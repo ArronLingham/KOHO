@@ -1,6 +1,6 @@
 # Move the Money
 
-A Python + SQLite library for the KOHO assignment. **Stage 3:** open funded
+A Python + SQLite library for the KOHO assignment. **Stage 6:** open funded
 accounts, transfer money, retrieve balances, and retrieve incoming/outgoing history.
 Transfers have persisted retry identity and stable receipts. The test suite covers
 the four required invariants, including overlapping transfers competing for funds
@@ -19,32 +19,24 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-## Account, transfer, retry, and history example
+## Deterministic library demo
 
 ```sh
-.venv/bin/python - <<'PY'
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from move_money import MoneyService
-
-with TemporaryDirectory() as directory:
-    service = MoneyService(Path(directory) / "example.db")
-    funded = service.open_account(10_000)
-    empty = service.open_account(0)
-    receipt = service.transfer("example-payment", funded.account_id, empty.account_id, 8000)
-    replay = service.transfer("example-payment", funded.account_id, empty.account_id, 8000)
-    assert replay == receipt
-    print("funded:", service.get_balance(funded.account_id), "cents")
-    print("empty:", service.get_balance(empty.account_id), "cents")
-    print("receipt:", receipt)
-    print("sender history:", service.get_history(funded.account_id))
-    print("recipient history:", service.get_history(empty.account_id))
-PY
+.venv/bin/python scripts/demo.py
 ```
 
-The balances printed are 2,000 and 8,000 cents. The first receipt has sequence 1;
-the replay adds no transfer or history entry. Each account has one history entry
-referring to that same receipt, with its own incoming/outgoing direction.
+The demo uses a fresh disposable database each run and calls the public library
+for every operation. It opens accounts with 10,000/0 CAD cents, transfers 8,000,
+and returns the original receipt on replay. It rejects a conflicting amount,
+an overspend, and a money string with explicit domain errors, checking that all
+balances and histories remain unchanged after each rejection.
+
+The final balances are 2,000/8,000 cents, with conserved total=10,000 and one
+canonical receipt (`sequence=1`, `transfer_id=demo-payment`, `sender_id=1`,
+`recipient_id=2`, `amount_cents=8000`). Each account has one history entry for that
+receipt with its outgoing/incoming direction. The demo checks its results, removes
+the temporary database, and exits with an error if an expected outcome does not hold.
+Two fresh executions produced identical output. Business rules remain in the service.
 
 ## Behavior contract
 
@@ -129,10 +121,12 @@ count alone is not the deciding factor; SQLite can handle substantial local data
 See the [SQLite usage guidance](https://www.sqlite.org/whentouse.html). The selected
 backend remains SQLite; PostgreSQL has not been implemented or benchmarked here.
 
-Next, after user review: the bounded Stage 4 critique and final submission
-documentation. No later stage or publishing
-action runs automatically. See [WORKING_NOTES.md](WORKING_NOTES.md) for actual
-checkpoints and [TEST_PLAN.md](TEST_PLAN.md) for mapped evidence and remaining limits.
+Stage 4's read-only critique found no actionable correctness defect. Stage 6 adds
+the executed library demo. Next, after user review: Stage 7's final documentation,
+truthful one-page build log, clean-environment verification, and submission packaging.
+No later stage or publishing action runs automatically. See
+[WORKING_NOTES.md](WORKING_NOTES.md) for actual checkpoints and
+[TEST_PLAN.md](TEST_PLAN.md) for mapped evidence and remaining limits.
 
 ## Verification scope
 
@@ -151,6 +145,17 @@ Run the assignment's named competing-transfer check independently:
 It requires A=10,000, B=C=0; two different keys requesting 8,000 each; one success,
 one insufficient-funds result, A=2,000, destinations 8,000/0, conserved total=10,000,
 one persisted transfer, and consistent histories.
+
+Run the focused failure and rollback checks:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_transfer_failures.py
+```
+
+These six cases exercise failures after debit, after credit, after record insertion,
+at a busy commit, at writer acquisition, and a discarded response followed by
+reopen/retry. Failed attempts preserve balances/history/key availability; committed
+requests replay without another movement.
 
 Run the separate-process checks, including abrupt transfer exits and reader visibility:
 

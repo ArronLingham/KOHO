@@ -395,3 +395,23 @@ and judgments must come from the user; none are attributed to them here.
 - First milestone message: `Add deterministic demo of the public money library`.
   README/demo and focused correctness-check commands remain to be completed within
   this stage before stopping for the user's review.
+
+## Stage 6 documentation checkpoint and review boundary
+
+- The demo milestone was committed as `15e31ce`. README now gives the executable
+  demo command, its observed receipt/balances/history/errors, and focused commands
+  for competing transfers and failure/rollback evidence.
+- The README competing-transfer command ran successfully:
+  `tests/test_transfer_concurrency.py::test_competing_transfers_cannot_overspend`
+  reported **1 passed in 0.14s**, exit code 0.
+- The README failure/rollback command ran successfully:
+  `tests/test_transfer_failures.py` reported **6 passed in 0.14s**, exit code 0.
+- Documentation diffs were inspected and whitespace checks passed. The full-suite
+  result after the demo remains **372 passed in 2.91s**; subsequent edits change
+  documentation only. Production service, schema, dependencies, and tests were
+  unchanged during Stage 6.
+- Final milestone message: `Document verified demo and focused correctness checks`.
+  Stage 6 is complete and stops for review. Stage 7's final documentation, build
+  log, clean-environment verification, and packaging have not begun. No publishing
+  or submission action was taken. Actual assignment elapsed/remaining time and
+  the user's personal review observations remain unknown.
