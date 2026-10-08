@@ -165,3 +165,20 @@ and judgments must come from the user; none are attributed to them here.
 - Assistant inspected the source diff; `git diff --check` passed. This coherent
   milestone is ready to commit as `Apply transfers atomically with retry identity`.
   History and stronger transfer evidence remain to be completed within this stage.
+
+## History checkpoint
+
+- Transfer milestone committed as `9c733a1` —
+  `Apply transfers atomically with retry identity`.
+- Added `get_history(account_id)`, returning incoming/outgoing entries in persisted
+  sequence order. Both account views use the same canonical receipt. A single
+  query distinguishes an absent account from a present account with no transfers.
+  Opening funding remains separate, and sender/recipient lookup indexes were added.
+- Added empty/missing/invalid-history cases, ordered incoming/outgoing assertions,
+  reopen and opening-plus-history reconciliation, excluded failed/conflicting/
+  replay entries, and 100 exact one-cent transfers.
+- `.venv/bin/python -m pytest -q`: **165 passed in 0.88s**, exit code 0.
+  Source/test changes were inspected; `git diff --check` passed.
+- This milestone is ready to commit as `Expose ordered incoming and outgoing history`.
+  Controlled concurrency, injected transfer failures, and wider invalid transfer
+  inputs remain to be checked before Stage 2 stops.

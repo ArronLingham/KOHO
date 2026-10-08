@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
+from typing import Literal
 
 from .storage import MAX_CENTS, _connection, _initialize, _write_transaction
 
@@ -45,6 +46,12 @@ class TransferReceipt:
     sender_id: int
     recipient_id: int
     amount_cents: int
+
+
+@dataclass(frozen=True)
+class HistoryEntry:
+    transfer: TransferReceipt
+    direction: Literal["incoming", "outgoing"]
 
 
 def _receipt(row: sqlite3.Row) -> TransferReceipt:
@@ -100,6 +107,25 @@ class MoneyService:
         if row is None:
             raise AccountNotFound(f"Account {account_id} does not exist")
         return row["balance_cents"]
+
+    def get_history(self, account_id: int) -> list[HistoryEntry]:
+        _validate_integer(account_id, "account_id", minimum=1)
+        with _connection(self._database_path) as connection:
+            # One read distinguishes a missing account from an existing empty history.
+            rows = connection.execute(
+                "SELECT t.* FROM accounts AS a LEFT JOIN transfers AS t "
+                "ON t.sender_id = a.account_id OR t.recipient_id = a.account_id "
+                "WHERE a.account_id = ? ORDER BY t.sequence",
+                (account_id,),
+            ).fetchall()
+        if not rows:
+            raise AccountNotFound(f"Account {account_id} does not exist")
+        return [
+            HistoryEntry(
+                _receipt(row), "outgoing" if row["sender_id"] == account_id else "incoming",
+            )
+            for row in rows if row["sequence"] is not None
+        ]
 
     def transfer(
         self, transfer_id: str, sender_id: int, recipient_id: int, amount_cents: int,

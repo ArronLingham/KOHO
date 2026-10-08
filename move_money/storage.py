@@ -69,3 +69,11 @@ def _initialize(database_path: Path) -> None:
         with _write_transaction(connection):
             connection.execute(_ACCOUNT_SCHEMA)
             connection.execute(_TRANSFER_SCHEMA)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS transfers_sender "
+                "ON transfers (sender_id, sequence)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS transfers_recipient "
+                "ON transfers (recipient_id, sequence)"
+            )
