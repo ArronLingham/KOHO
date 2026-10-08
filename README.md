@@ -1,184 +1,127 @@
 # Move the Money
 
-A Python + SQLite library for the KOHO assignment. **Stage 6:** open funded
-accounts, transfer money, retrieve balances, and retrieve incoming/outgoing history.
-Transfers have persisted retry identity and stable receipts. The test suite covers
-the four required invariants, including overlapping transfers competing for funds
-across threads and separate processes, and abrupt process exits during transfers.
+A small Python + SQLite library for opening funded accounts, transferring money,
+reading current balances, and reading transaction histories. Business rules live
+in `MoneyService`; the executable demo uses that same public interface.
 
-## Setup and tests
+## Run and test
 
-Requires Python 3.12+ with SQLite 3.37.0+ (for `STRICT` tables).
-The runtime uses only Python's standard library; pytest is a development dependency.
+Requires Python 3.12+ with SQLite 3.37.0+ (`STRICT` tables). The observed runtime
+is Python 3.14.7 / SQLite 3.53.4. There are no runtime dependencies; pytest 9.1.1
+is the development dependency.
 
 From the repository folder:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install --no-cache-dir -e '.[dev]'
+.venv/bin/python scripts/demo.py
 .venv/bin/python -m pytest -q
 ```
 
-## Deterministic library demo
+The demo creates and removes a fresh temporary database. It opens 10,000/0 CAD-cent
+accounts, transfers 8,000, replays the original receipt, and rejects a changed
+payload, an overspend, and a money string without changing state. It finishes with
+balances 2,000/8,000, conserved total=10,000, and one transfer appearing as outgoing
+and incoming in the two histories. Unexpected outcomes fail the demo.
 
-```sh
-.venv/bin/python scripts/demo.py
-```
-
-The demo uses a fresh disposable database each run and calls the public library
-for every operation. It opens accounts with 10,000/0 CAD cents, transfers 8,000,
-and returns the original receipt on replay. It rejects a conflicting amount,
-an overspend, and a money string with explicit domain errors, checking that all
-balances and histories remain unchanged after each rejection.
-
-The final balances are 2,000/8,000 cents, with conserved total=10,000 and one
-canonical receipt (`sequence=1`, `transfer_id=demo-payment`, `sender_id=1`,
-`recipient_id=2`, `amount_cents=8000`). Each account has one history entry for that
-receipt with its outgoing/incoming direction. The demo checks its results, removes
-the temporary database, and exits with an error if an expected outcome does not hold.
-Two fresh executions produced identical output. Business rules remain in the service.
-
-## Behavior contract
-
-All amounts are plain Python integers in CAD cents. Opening balances accept
-`0..2**63-1`; transfer amounts accept `1..2**63-1`. Account IDs are generated positive
-plain integers in the same signed range. Booleans, numeric strings, floats, numeric
-wrappers/subclasses, conversion objects, and out-of-range values raise `InvalidInput`.
-A valid but missing account raises `AccountNotFound`; a new self-transfer is invalid.
-
-`transfer(transfer_id, sender_id, recipient_id, amount_cents)` returns a frozen
-`TransferReceipt` containing the persisted sequence and request details. A key is a
-nonblank plain string containing valid UTF-8 text without NUL characters. Keys are
-global within the database and compared exactly; whitespace is not trimmed and text
-is not normalized. Strings are appropriate for keys and paths, never money or IDs.
-
-- Same key and same details: return the original receipt without another movement,
-  even after balances change or the database is reopened.
-- Same committed key and different valid details: raise `TransferConflict` before
-  current funds, account existence, or self-transfer checks. Input type/range checks
-  still run first.
-- Failed uncommitted attempt: leave no transfer record and keep the key available.
-- Insufficient sender funds: raise `InsufficientFunds`. Recipient overflow: raise
-  `BalanceOverflow`. Both preserve every balance and transfer record.
-
-`get_history(account_id)` returns a list of frozen `HistoryEntry` values, each with
-`transfer` and `direction` (`incoming` or `outgoing`), ordered by persisted sequence.
-Only successful transfers appear. Opening funding is separate; reconcile balances
-as opening plus incoming minus outgoing. Existing empty histories return `[]`.
-
-## Transactions and invariant evidence
-
-| Invariant | Enforcement and executable evidence |
-|---|---|
-| Never negative | Writer lock before reads; conditional debit; stored nonnegative checks; exact spending, insufficient funds, and controlled thread/process competing-transfer tests |
-| All or nothing | One explicit transaction for debit, credit, and receipt; injected failures and abrupt child exits after debit/credit/insertion; busy commit rollback; readers cannot see a paused uncommitted debit |
-| Apply at most once | Unique persisted key; lookup before business checks; sequential and thread/process replay/conflicts; child exit after commit before a returned receipt followed by reopen/retry |
-| Exact amounts | Plain integer inputs and STRICT integer storage with bounds; one-cent/max/overflow tests and seeded ledger comparisons with exact totals |
-
-Each operation owns a connection to a local database file. Writes acquire SQL
-`BEGIN IMMEDIATE` before state-dependent reads; debit, credit, and canonical transfer
-record commit together. Success returns only after SQL `COMMIT`; exceptions roll
-back an active transaction. Python connections use `autocommit=True`, foreign keys
-enabled, dirty reads disabled, and a five-second lock timeout. SQLite storage errors
-propagate to callers; they are not converted into insufficient funds or success.
-There is no automatic retry loop. A caller uncertain about success retries the same
-key and payload.
-
-SQLite STRICT permits lossless numeric-string conversion through direct SQL. The
-public API rejects those strings explicitly. Database constraints are a second
-defense; they do not make arbitrary external database writes a supported money API.
-Opening accounts introduces funding; transfers conserve the existing total.
-
-SQLite permits one writer at a time, including across processes using the same
-local database file. The overlap tests hold the first real writer transaction and
-trace the second caller's `BEGIN IMMEDIATE` attempt before releasing the first.
-Each worker creates its own connection. Unexpected exceptions, lock errors, missing
-outcomes, and timeouts fail these tests. This exercises contention at the writer
-boundary, not simultaneous execution inside two writer transactions.
-
-The process checks use Python's `spawn` start method and confirm two child process
-IDs distinct from the parent. Both services are initialized before coordinating
-the transfer attempts. Separate child-only SQL wrappers report actual transaction
-state and terminate immediately at selected transfer boundaries. No fault hook or
-in-process lock is added to the production library.
-
-## Limits and next steps
-
-This is a local, single-currency assignment library. No UI, HTTP API, authentication,
-signup, deployment, client/bank ownership model, or multi-currency conversion is
-included. Protect database-file access through the host operating system. Receipts
-have a stable sequence, not timestamps, and history is currently returned in full.
-
-Tests use the observed local Python/SQLite runtime and finite controlled schedules.
-Physical power loss, disk corruption/recovery, backups, sustained load, all possible
-schedules, and a runtime-version matrix have not been established. Abrupt process
-exit tests do not simulate physical power loss. A reader can delay a commit;
-if contention outlasts the timeout, the operation raises a storage error and rolls
-back. Existing database schema changes are not managed by a versioned migration tool.
-
-Many simultaneous writers or shared server access would justify PostgreSQL. Account
-count alone is not the deciding factor; SQLite can handle substantial local datasets.
-See the [SQLite usage guidance](https://www.sqlite.org/whentouse.html). The selected
-backend remains SQLite; PostgreSQL has not been implemented or benchmarked here.
-
-Stage 4's read-only critique found no actionable correctness defect. Stage 6 adds
-the executed library demo. Next, after user review: Stage 7's final documentation,
-truthful one-page build log, clean-environment verification, and submission packaging.
-No later stage or publishing action runs automatically. See
-[WORKING_NOTES.md](WORKING_NOTES.md) for actual checkpoints and
-[TEST_PLAN.md](TEST_PLAN.md) for mapped evidence and remaining limits.
-
-## Verification scope
-
-The current suite contains 372 passing cases on the observed runtime: account and
-transfer validation, generated account/transfer models, history reconciliation,
-real SQLite rollback/lock/commit failures, overlapping transfer/retry/conflict
-attempts across threads/processes, concurrent account creation, account/transfer
-process exits, committed visibility, and SQLite integrity/foreign-key checks.
-
-Run the assignment's named competing-transfer check independently:
+Run the required competing-transfer proof separately:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_transfer_concurrency.py::test_competing_transfers_cannot_overspend
 ```
 
-It requires A=10,000, B=C=0; two different keys requesting 8,000 each; one success,
-one insufficient-funds result, A=2,000, destinations 8,000/0, conserved total=10,000,
-one persisted transfer, and consistent histories.
+It overlaps two different-key 8,000-cent requests from A=10,000 to B=C=0. It
+requires one success, one `InsufficientFunds`, A=2,000, destination balances
+8,000/0, total=10,000, one persisted transfer, and matching histories. Independent
+connections and bounded coordination verify a held writer and the second caller's
+actual `BEGIN IMMEDIATE` attempt. Lock errors or missing outcomes fail the test.
 
-Run the focused failure and rollback checks:
+Further focused checks:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_transfer_failures.py
-```
-
-These six cases exercise failures after debit, after credit, after record insertion,
-at a busy commit, at writer acquisition, and a discarded response followed by
-reopen/retry. Failed attempts preserve balances/history/key availability; committed
-requests replay without another movement.
-
-Run the separate-process checks, including abrupt transfer exits and reader visibility:
-
-```sh
 .venv/bin/python -m pytest -q tests/test_transfer_processes.py
-```
-
-The three pre-commit exit cases require completely unchanged state and a retryable
-key. The post-commit exit case requires one persisted receipt and an unchanged replay.
-The paused-debit case requires the parent reader to see original balances/history
-until the child commits. Exit checkpoints confirm the intended SQL boundary and
-whether the transaction is still active; unexpected exits fail the tests.
-
-To check that selected tests detect intentionally weakened code in disposable copies:
-
-```sh
 .venv/bin/python scripts/check_test_sensitivity.py
 ```
 
-This experiment checks eight mutation cases involving seven distinct changes,
-including failed-debit handling, committed replay, and rollback after transfer failure.
-The failed-debit mutation is checked against both thread and process races.
-Each unmodified control must
-pass, each named mutated test must fail, and actual source hashes must remain
-unchanged. Disposable copies are removed. These are planned test experiments, not
-accidental AI mistakes or proof of every possible fault.
+The recorded suite has 372 passing cases. Selected sensitivity checks detected
+8/8 deliberate mutations in disposable copies, with passing unmodified controls
+and unchanged actual source. See [TEST_PLAN.md](TEST_PLAN.md) for mapped evidence
+and [WORKING_NOTES.md](WORKING_NOTES.md) for exact executed checkpoints.
+
+## Public contract
+
+```python
+from move_money import MoneyService
+
+service = MoneyService("money.db")  # A local file, not :memory:.
+sender = service.open_account(10_000)
+recipient = service.open_account(0)
+receipt = service.transfer("payment-1", sender.account_id, recipient.account_id, 8000)
+balance = service.get_balance(sender.account_id)  # 2000 cents
+history = service.get_history(sender.account_id)  # One outgoing entry
+```
+
+All amounts are plain Python integers in CAD cents. Opening balances accept
+`0..2**63-1`, transfers `1..2**63-1`, and account IDs `1..2**63-1`. Strings, floats,
+booleans, wrappers/subclasses, conversion objects, and out-of-range values raise
+`InvalidInput`. Valid but absent accounts raise `AccountNotFound`; new self-transfers
+are invalid. Insufficient funds and recipient overflow raise `InsufficientFunds`
+and `BalanceOverflow`, preserving balances and transfer records.
+
+Transfer keys are global within the database: nonblank plain strings, valid UTF-8,
+without NUL characters, compared exactly without trimming or normalization.
+
+- Same key and details: return the original frozen receipt without another movement,
+  even after balances change or the database is reopened.
+- Same committed key and changed valid details: `TransferConflict`, before current
+  funds/existence/self-transfer checks. Input type/range validation still runs first.
+- Failed uncommitted attempt: no receipt is stored; the key remains available.
+
+**Current balances are stored and updated on every successful transfer.**
+`get_balance` reads that stored value; it does not sum history. Opening plus total
+incoming minus total outgoing is a reconciliation check. Opening funding is stored
+separately and is not a transfer-history entry. History contains successful
+transfers only, ordered by persisted sequence; each frozen entry contains the
+canonical receipt and its incoming/outgoing direction. Empty history returns `[]`.
+Balance and history are separate operations, each reading committed state.
+
+## How the four rules are enforced
+
+| Required rule | Mechanism and evidence |
+|---|---|
+| Never negative | Writer transaction before decisions, conditional debit, stored bounds; exact-spending and thread/process competing-transfer tests |
+| All or nothing | Debit, credit, and receipt in one explicit transaction; injected failures, busy-commit rollback, abrupt pre-commit exits, and reader visibility tests |
+| Applied at most once | Unique persisted key and replay before business checks; overlapping retries/conflicts and post-commit exit followed by replay |
+| Exact amounts | Plain integer validation, STRICT bounded integer columns, overflow checks; one-cent/max cases and independent seeded ledger models |
+
+Each operation owns its connection. Writes use SQL `BEGIN IMMEDIATE`, `COMMIT`, and
+`ROLLBACK`; success returns after commit. Connections use `autocommit=True`, enabled
+foreign keys, disabled dirty reads, and a five-second lock timeout. SQLite errors
+propagate; there is no automatic retry loop. An uncertain caller retries the same
+key and payload. SQLite STRICT allows lossless numeric-string conversion through
+direct SQL, so public validation is essential. External SQL writes are not a
+supported money API.
+
+SQLite permits one write transaction at a time across connections/processes on the
+same local file. This makes the serialization boundary explicit, with write
+throughput as the tradeoff. Readers can delay a commit; a timeout causes rollback
+and a storage error. See [SQLite transactions](https://www.sqlite.org/lang_transaction.html).
+
+## Scope, limits, and next step
+
+The assignment accepts a library. UI, HTTP API, authentication, signup, deployment,
+client/bank ownership, and multi-currency conversion were excluded. File access
+depends on operating-system permissions. History has no pagination/timestamps;
+schema changes have no versioned migration tool.
+
+Evidence covers finite controlled schedules on the observed runtime. It does not
+establish every execution, sustained-load performance, physical power-loss or disk
+corruption recovery, backup procedures, or all supported runtime versions. Abrupt
+process exits are not physical power-loss simulations.
+
+The next engineering hour would verify another supported Python/SQLite combination
+and turn any concrete finding into a focused regression. The remaining submission
+step is the author's review of personal/time fields in [BUILD_LOG.md](BUILD_LOG.md).
+See [SUBMISSION.md](SUBMISSION.md) for delivery checks and the short demo outline.

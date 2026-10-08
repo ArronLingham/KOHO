@@ -1,11 +1,11 @@
 # Correctness evidence and remaining limits
 
-The original assignment brief governs requirements. Stage 2 implemented the four
-required operations; Stage 3 extends evidence across separate processes, abrupt
-transfer exits, and uncommitted reader visibility with the selected SQLite backend.
-A green suite
-establishes the checks below on the observed runtime, not all possible executions
-or completion of later review/submission stages.
+The original assignment brief governs requirements. All four required operations
+are implemented. Evidence includes separate processes, abrupt transfer exits, and
+uncommitted reader visibility with the selected SQLite backend. Stage 4's review
+found no actionable correctness defect; Stage 6 added the public-library demo.
+A green suite establishes the checks below on the observed runtime, not all
+possible executions or the author's final submission review.
 Finite tests exercise counterexamples; general correctness also depends on input
 validation, database constraints, transaction boundaries, and durable retry identity.
 
@@ -82,7 +82,9 @@ These deliberate experiments are not AI mistake narratives.
   power-loss/corruption recovery, backups, or all supported runtime versions.
 - Production authorization, encryption, client/bank isolation, and multi-currency
   behavior; these are outside the assignment's current local library scope.
-- Later user-controlled critique and final README/build-log/submission review.
+- The author's final README/build-log/submission review and missing personal/time
+  facts. Stage 4's assistant critique is complete; final packaging evidence is in
+  WORKING_NOTES.
 
 ## Verification and commit policy
 

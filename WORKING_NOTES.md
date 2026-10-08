@@ -415,3 +415,48 @@ and judgments must come from the user; none are attributed to them here.
   log, clean-environment verification, and packaging have not begun. No publishing
   or submission action was taken. Actual assignment elapsed/remaining time and
   the user's personal review observations remain unknown.
+
+## Stage 7 authorization and documentation checkpoint
+
+- The author directed work to finish the assignment's required scope and defer
+  extras. This authorizes Stage 7 documentation, verification, and local packaging.
+  Proposed budget: 20 minutes. Actual total/remaining assignment time is unknown;
+  the author was asked for total time, personal review concerns, and SQLite rationale.
+  The author replied that they will gather and provide those facts; fields remain
+  pending while independent checks proceed.
+- Clarified a misleading balance explanation: current balances already update
+  within each successful transfer; `get_balance` reads the stored column. The
+  opening-plus-history formula checks reconciliation and does not drive lookup.
+  The author questioned this explanation; no production money-code fix was needed.
+- A combined balance/history snapshot report was raised as a future concern. The
+  author rejected expanding current work beyond the brief. No flag/event, combined
+  report, backend migration, or extra product feature was added.
+- The immediately preceding explanation turn reran the full suite with bytecode
+  and pytest-cache writes disabled: **372 passed in 3.32s**, exit code 0.
+- Rewrote README concisely around actual setup/operations/invariants/retry/history,
+  including direct stored-balance updates. Added BUILD_LOG's roughly one-page factual
+  draft with explicit missing-author fields, plus SUBMISSION's delivery checks and
+  short demo outline. TEST_PLAN's stage/status descriptions were brought up to date.
+- An initial documentation patch incorrectly combined deletion and addition of
+  README in one tool request. The tool rejected it before changing files; separate
+  patch requests corrected the tool formatting. This did not affect money code.
+- Git started clean at `b934015`; history contains genuine incremental commits and
+  no configured remote. The local Git bundle route is being prepared within the
+  authorized packaging scope; nothing will be sent or published.
+- pip cache inspection remains unavailable due to cache directory permissions.
+  Clean verification will use a separate checkout and fresh environment with
+  `--no-cache-dir`; the existing environment will not be copied.
+- Clean-checkout verification and bundle checks are pending at this checkpoint.
+  Milestone message: `Clarify stored balances and draft assignment handoff`.
+
+## Author-supplied Stage 7 facts
+
+- The author reported **two hours used so far**. This is the latest supplied
+  assignment-time checkpoint (120 minutes used / 120 minutes nominally remaining),
+  not a measured final duration. Subsequent tool timings will not be added to it.
+- The author reports reviewing everything after each stage, including the tech
+  stack. Python was chosen because it is the language they are most comfortable
+  with; SQLite was chosen because this project is small and does not need the
+  additional write capacity of PostgreSQL. No throughput benchmark is claimed.
+- BUILD_LOG was updated with those supplied facts. The final elapsed-time update
+  and any personal shipped concern remain author fields; none are inferred.
