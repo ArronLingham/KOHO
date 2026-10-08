@@ -1,7 +1,9 @@
 # Correctness evidence and remaining limits
 
-The original assignment brief governs requirements. Stage 2 implements the four
-required operations with the selected Python + SQLite backend. A green suite
+The original assignment brief governs requirements. Stage 2 implemented the four
+required operations; Stage 3 extends evidence across separate processes, abrupt
+transfer exits, and uncommitted reader visibility with the selected SQLite backend.
+A green suite
 establishes the checks below on the observed runtime, not all possible executions
 or completion of later review/submission stages.
 Finite tests exercise counterexamples; general correctness also depends on input
@@ -30,9 +32,9 @@ for database paths and the transfer identifier.
 
 | Rule | Executed scenarios and assertions |
 |---|---|
-| Balances never negative | `test_transfers.py` tests exact spending and rejection. `test_transfer_concurrency.py::test_competing_transfers_cannot_overspend` forces overlapping 8,000-cent attempts from A=10,000, B=C=0: one success/one insufficient result, A=2,000, destinations 8,000/0, total=10,000, one row, matching histories |
-| All-or-nothing transfers | `test_transfer_failures.py` injects failures before credit, before record insertion, after insertion, and at a busy commit. Complete accounts/records/history are unchanged; same-key retry succeeds after removing the failure |
-| Same transfer applied once | Sequential/concurrent same-key cases return identical receipts; depleted sender replay succeeds; discarded response followed by reopen/retry moves once. Changed sender/recipient/amount conflict, including concurrent changed payload; failed attempts do not consume keys |
+| Balances never negative | `test_transfers.py` tests exact spending and rejection. `test_transfer_concurrency.py::test_competing_transfers_cannot_overspend` and `test_transfer_processes.py::test_separate_processes_competing_for_funds_cannot_overspend` force overlapping 8,000-cent attempts from A=10,000, B=C=0: one success/one insufficient result, A=2,000, destinations 8,000/0, total=10,000, one row, matching histories |
+| All-or-nothing transfers | `test_transfer_failures.py` injects failures before credit/record, after insertion, and at busy begin/commit. `test_transfer_processes.py` exits real children after debit/credit/completed insertion, checks restored state after reopen, and confirms independent readers cannot see a paused debit. Failed attempts leave state/key unchanged and same-key retry succeeds |
+| Same transfer applied once | Sequential and thread/process same-key cases return identical receipts; depleted sender replay succeeds; discarded response and actual child exit after commit before returning a receipt both replay once after reopen. Changed sender/recipient/amount conflict, including thread/process overlapping changed payloads; failed attempts do not consume keys |
 | Exact amounts | One cent, 100 repeated one-cent transfers, maximum, exact recipient maximum, and overflow. All three numeric request fields reject 40 adversarial cases each. Four seeded 80-operation ledger models check every balance, row, history, total, bound, and reopen result |
 
 Additional executed contract checks cover 17 invalid keys, exact Unicode/whitespace/
@@ -50,17 +52,32 @@ collected. Lock errors, worker crashes, missing results, and timeouts fail the t
 The first caller is deliberately scheduled to win; this establishes overlapping
 attempts and serialization at that boundary, not every possible schedule.
 
-`scripts/check_test_sensitivity.py` executed seven disposable mutations with passing
-controls and required named test failures. The three transfer mutations ignore a
+The process version uses `spawn`, verifies two different child IDs distinct from the
+parent, and waits for both initialized services before starting. Bounded pipe messages
+prove held-writer/second-BEGIN overlap, collect every outcome, and require normal
+child exits. Cleanup terminates leftover test children. No application process lock
+is used. Reopened account/receipt/history state must reconcile, `integrity_check`
+must report `ok`, and `foreign_key_check` must be empty.
+
+Abrupt-transfer tests forward real SQL through a child-only connection wrapper,
+report the reached statement boundary and actual transaction state, and call
+`os._exit(17)` without Python cleanup. Three pre-commit cases require original state
+and successful same-key retry. A post-commit case requires one persisted receipt and
+an unchanged replay; it exits before the service can return its business response.
+The paused-debit case keeps the child alive while independent parent readers require
+the original balances and empty histories, then checks the completed transfer.
+
+`scripts/check_test_sensitivity.py` executed eight disposable mutation cases (seven
+distinct code changes) with passing controls and required named test failures.
+The three transfer changes ignore a
 failed debit (detected by the actual competing-transfer test), skip committed replay
 (detected by concurrent same-key checks), or commit after a transfer failure
 (detected by injected rollback checks). Actual source hashes remained unchanged.
+The failed-debit mutation is also detected by the separate-process competing test.
 These deliberate experiments are not AI mistake narratives.
 
 ## Further evidence not yet established
 
-- Transfer races between separate processes and process termination during an
-  actual transfer; existing child-process checks concern account writes only.
 - Every lock/read/write schedule, sustained load, performance benchmarks, physical
   power-loss/corruption recovery, backups, or all supported runtime versions.
 - Production authorization, encryption, client/bank isolation, and multi-currency

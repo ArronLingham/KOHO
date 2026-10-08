@@ -1,9 +1,10 @@
 # Move the Money
 
-A Python + SQLite library for the KOHO assignment. **Stage 2:** open funded
+A Python + SQLite library for the KOHO assignment. **Stage 3:** open funded
 accounts, transfer money, retrieve balances, and retrieve incoming/outgoing history.
 Transfers have persisted retry identity and stable receipts. The test suite covers
-the four required invariants, including overlapping transfers competing for funds.
+the four required invariants, including overlapping transfers competing for funds
+across threads and separate processes, and abrupt process exits during transfers.
 
 ## Setup and tests
 
@@ -77,9 +78,9 @@ as opening plus incoming minus outgoing. Existing empty histories return `[]`.
 
 | Invariant | Enforcement and executable evidence |
 |---|---|
-| Never negative | Writer lock before reads; conditional debit; stored nonnegative checks; exact spending, insufficient funds, and controlled competing-transfer test |
-| All or nothing | One explicit transaction for debit, credit, and receipt; injected failures after debit/credit/insertion and at commit restore complete state |
-| Apply at most once | Unique persisted key; committed lookup before business checks; sequential/concurrent replay, payload conflicts, and discarded-response/reopen checks |
+| Never negative | Writer lock before reads; conditional debit; stored nonnegative checks; exact spending, insufficient funds, and controlled thread/process competing-transfer tests |
+| All or nothing | One explicit transaction for debit, credit, and receipt; injected failures and abrupt child exits after debit/credit/insertion; busy commit rollback; readers cannot see a paused uncommitted debit |
+| Apply at most once | Unique persisted key; lookup before business checks; sequential and thread/process replay/conflicts; child exit after commit before a returned receipt followed by reopen/retry |
 | Exact amounts | Plain integer inputs and STRICT integer storage with bounds; one-cent/max/overflow tests and seeded ledger comparisons with exact totals |
 
 Each operation owns a connection to a local database file. Writes acquire SQL
@@ -103,6 +104,12 @@ Each worker creates its own connection. Unexpected exceptions, lock errors, miss
 outcomes, and timeouts fail these tests. This exercises contention at the writer
 boundary, not simultaneous execution inside two writer transactions.
 
+The process checks use Python's `spawn` start method and confirm two child process
+IDs distinct from the parent. Both services are initialized before coordinating
+the transfer attempts. Separate child-only SQL wrappers report actual transaction
+state and terminate immediately at selected transfer boundaries. No fault hook or
+in-process lock is added to the production library.
+
 ## Limits and next steps
 
 This is a local, single-currency assignment library. No UI, HTTP API, authentication,
@@ -111,8 +118,9 @@ included. Protect database-file access through the host operating system. Receip
 have a stable sequence, not timestamps, and history is currently returned in full.
 
 Tests use the observed local Python/SQLite runtime and finite controlled schedules.
-Physical power loss, disk corruption/recovery, backups, process-level transfer races,
-and a runtime-version matrix have not been established. A reader can delay a commit;
+Physical power loss, disk corruption/recovery, backups, sustained load, all possible
+schedules, and a runtime-version matrix have not been established. Abrupt process
+exit tests do not simulate physical power loss. A reader can delay a commit;
 if contention outlasts the timeout, the operation raises a storage error and rolls
 back. Existing database schema changes are not managed by a versioned migration tool.
 
@@ -121,17 +129,18 @@ count alone is not the deciding factor; SQLite can handle substantial local data
 See the [SQLite usage guidance](https://www.sqlite.org/whentouse.html). The selected
 backend remains SQLite; PostgreSQL has not been implemented or benchmarked here.
 
-Next, after user review: complete any further Stage 3 evidence requested, then the
-bounded critique and final submission documentation. No later stage or publishing
+Next, after user review: the bounded Stage 4 critique and final submission
+documentation. No later stage or publishing
 action runs automatically. See [WORKING_NOTES.md](WORKING_NOTES.md) for actual
 checkpoints and [TEST_PLAN.md](TEST_PLAN.md) for mapped evidence and remaining limits.
 
 ## Verification scope
 
-The current suite contains 363 passing cases on the observed runtime: account and
+The current suite contains 372 passing cases on the observed runtime: account and
 transfer validation, generated account/transfer models, history reconciliation,
 real SQLite rollback/lock/commit failures, overlapping transfer/retry/conflict
-attempts, concurrent account creation, and account process-exit checks.
+attempts across threads/processes, concurrent account creation, account/transfer
+process exits, committed visibility, and SQLite integrity/foreign-key checks.
 
 Run the assignment's named competing-transfer check independently:
 
@@ -143,14 +152,28 @@ It requires A=10,000, B=C=0; two different keys requesting 8,000 each; one succe
 one insufficient-funds result, A=2,000, destinations 8,000/0, conserved total=10,000,
 one persisted transfer, and consistent histories.
 
+Run the separate-process checks, including abrupt transfer exits and reader visibility:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_transfer_processes.py
+```
+
+The three pre-commit exit cases require completely unchanged state and a retryable
+key. The post-commit exit case requires one persisted receipt and an unchanged replay.
+The paused-debit case requires the parent reader to see original balances/history
+until the child commits. Exit checkpoints confirm the intended SQL boundary and
+whether the transaction is still active; unexpected exits fail the tests.
+
 To check that selected tests detect intentionally weakened code in disposable copies:
 
 ```sh
 .venv/bin/python scripts/check_test_sensitivity.py
 ```
 
-This experiment checks seven selected mutations, including failed-debit handling,
-committed replay, and rollback after transfer failure. Each unmodified control must
+This experiment checks eight mutation cases involving seven distinct changes,
+including failed-debit handling, committed replay, and rollback after transfer failure.
+The failed-debit mutation is checked against both thread and process races.
+Each unmodified control must
 pass, each named mutated test must fail, and actual source hashes must remain
 unchanged. Disposable copies are removed. These are planned test experiments, not
 accidental AI mistakes or proof of every possible fault.

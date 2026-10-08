@@ -325,3 +325,29 @@ and judgments must come from the user; none are attributed to them here.
 - These are abrupt local process-exit and visibility tests on the observed SQLite
   runtime, not physical power loss, corruption recovery, or a real network response
   loss experiment. No production repair or fabricated AI mistake was necessary.
+
+## Stage 3 final evidence and review checkpoint
+
+- Process-exit/visibility milestone committed as `5e568df` —
+  `Check transfer process exits and committed visibility`.
+- Extended the disposable-copy sensitivity script to check the actual separate-
+  process competing-funds test against ignored failed-debit handling. Run result:
+  **8/8 mutation cases detected**, exit code 0, all controls passing and actual source
+  hashes unchanged. These cover seven distinct code changes; failed-debit handling
+  is checked against both the thread and process race. Collection/setup errors do
+  not count as detection. These are planned experiments, not accidental AI defects.
+- Final `.venv/bin/python -m pytest -q`: **372 passed in 3.27s**, exit code 0.
+  README's separate-process command ran against the final module:
+  **8 passed in 1.42s**, exit code 0. The earlier focused process/failure command and
+  both milestone full-suite results are retained above as separate actual checkpoints.
+- Updated README and TEST_PLAN to reflect completed Stage 3 evidence, exact process
+  test commands, coordination boundaries, abrupt-exit/replay/reader checks, mutation
+  cases, and remaining limits. Relevant diffs were inspected and whitespace checks
+  passed. Final milestone message: `Document process safety evidence and mutation checks`.
+- Production source, storage choice, dependencies, and public contract were unchanged
+  during Stage 3. Process evidence uses the observed local runtime and controlled
+  winner order. Physical power loss, corruption recovery, backup procedures, every
+  schedule, sustained load, and supported-version coverage remain unestablished.
+- Stage 3 stops for the user's review. Stage 4 critique, final concise build log,
+  packaging, and submission are not being performed in this turn. The user's review
+  judgment and actual assignment elapsed/remaining time remain unknown.

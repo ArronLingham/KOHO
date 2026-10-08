@@ -63,6 +63,13 @@ _MUTATIONS = [
         'connection.execute("COMMIT")  # Deliberate mutation in a disposable copy only.',
         "tests/test_transfer_failures.py::test_transfer_failure_rolls_back_balances_record_and_key[after-credit]",
     ),
+    (
+        "ignore-failed-debit-across-processes",
+        "move_money/service.py",
+        "if debit.rowcount != 1:",
+        "if False:  # Deliberate mutation in a disposable copy only.",
+        "tests/test_transfer_processes.py::test_separate_processes_competing_for_funds_cannot_overspend",
+    ),
 ]
 
 
