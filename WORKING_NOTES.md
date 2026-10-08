@@ -513,3 +513,18 @@ and judgments must come from the user; none are attributed to them here.
   delivery report. The initial broader bundle and its disposable review checkout
   will be removed after the corrected package is checked.
   Milestone message: `Limit submission bundle to the real project branch`.
+
+## README simplification checkpoint
+
+- The author requested a README containing only how to run the project and tests;
+  omitted features and next steps remain a discussion for author selection.
+- README now contains environment setup, the disposable demo, the full pytest
+  command, the focused competing-transfer command, and test-sensitivity checks.
+- `.venv/bin/python scripts/demo.py`: exit 0; final balances 2,000/8,000,
+  conserved total 10,000, one transfer, replay and rejection checks passed,
+  temporary database removed.
+- `.venv/bin/python -m pytest -q`: **520 passed in 4.42s**, exit 0.
+- `.venv/bin/python scripts/check_test_sensitivity.py`: **12/12 selected mutations
+  detected**, exit 0; unmodified controls passed and actual source was unchanged.
+- `git diff --check`: exit 0 before this working-note addition. Production code
+  and tests were not changed for this documentation update.
