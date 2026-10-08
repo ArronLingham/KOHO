@@ -18,6 +18,18 @@ CREATE TABLE IF NOT EXISTS accounts (
 ) STRICT
 """
 
+_TRANSFER_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS transfers (
+    sequence INTEGER PRIMARY KEY CHECK (sequence > 0),
+    transfer_id TEXT NOT NULL UNIQUE
+        CHECK (length(trim(transfer_id)) > 0 AND instr(transfer_id, char(0)) = 0),
+    sender_id INTEGER NOT NULL REFERENCES accounts(account_id),
+    recipient_id INTEGER NOT NULL REFERENCES accounts(account_id),
+    amount_cents INTEGER NOT NULL CHECK (amount_cents BETWEEN 1 AND {MAX_CENTS}),
+    CHECK (sender_id != recipient_id)
+) STRICT
+"""
+
 
 @contextmanager
 def _connection(database_path: Path) -> Iterator[sqlite3.Connection]:
@@ -56,3 +68,4 @@ def _initialize(database_path: Path) -> None:
     with _connection(database_path) as connection:
         with _write_transaction(connection):
             connection.execute(_ACCOUNT_SCHEMA)
+            connection.execute(_TRANSFER_SCHEMA)

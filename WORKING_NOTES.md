@@ -138,3 +138,30 @@ and judgments must come from the user; none are attributed to them here.
 - No runtime implementation repair was required by the observed new tests.
   No transfer/history feature or backend migration was performed. No personal
   judgment, actual total assignment time, or new AI-mistake story was invented.
+
+## Stage 2 authorization and transfer checkpoint
+
+- The user said to proceed, then explicitly confirmed keeping SQLite. No
+  PostgreSQL migration, dependency installation, or database server setup occurred.
+- Proposed Stage 2 budget: 50 minutes; actual total elapsed/remaining assignment
+  time remains unknown. The user owns that timer and relaxed timing emphasis.
+- Stage scope: transfers, stable receipts, retry/conflict handling, and history.
+  The user's request for rigorous checks also warrants essential competing-transfer
+  and rollback evidence before this stage stops for review.
+- Before edits, the suite reported **130 passed in 0.53s**, exit code 0.
+- Added the canonical successful-transfer table with unique keys, foreign keys,
+  integer/range constraints, and distinct-account checks. Each transfer acquires
+  `BEGIN IMMEDIATE` before retry lookup, account checks, or conditional updates.
+  Debit, credit, and receipt insertion share one commit/rollback boundary.
+- Committed receipts are replayed before current funds/existence/self-transfer
+  business checks. Changed valid payloads conflict. Failed uncommitted attempts
+  leave the key available. Keys are exact plain strings, nonblank, valid UTF-8,
+  without NUL characters; they are validated, not trimmed or normalized.
+- Added focused checks for exact/ordinary transfers, insufficient funds, recipient
+  overflow, missing/self accounts, stable replay after depletion and reopen,
+  changed payloads, failed-attempt retry, and parameterized SQL keys.
+- `.venv/bin/python -m pytest -q`: **152 passed in 0.69s**, exit code 0.
+  These sequential checks alone are not concurrency or injected-failure evidence.
+- Assistant inspected the source diff; `git diff --check` passed. This coherent
+  milestone is ready to commit as `Apply transfers atomically with retry identity`.
+  History and stronger transfer evidence remain to be completed within this stage.
