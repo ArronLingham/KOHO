@@ -42,6 +42,27 @@ _MUTATIONS = [
         "pass  # Deliberate mutation in a disposable copy only.",
         "tests/test_storage_failures.py::test_multiple_writes_roll_back_together_on_error_or_interruption[RuntimeError]",
     ),
+    (
+        "ignore-failed-debit",
+        "move_money/service.py",
+        "if debit.rowcount != 1:",
+        "if False:  # Deliberate mutation in a disposable copy only.",
+        "tests/test_transfer_concurrency.py::test_competing_transfers_cannot_overspend",
+    ),
+    (
+        "skip-committed-replay",
+        "move_money/service.py",
+        "if existing is not None:",
+        "if False:  # Deliberate mutation in a disposable copy only.",
+        "tests/test_transfer_concurrency.py::test_concurrent_same_key_returns_one_receipt_and_moves_once",
+    ),
+    (
+        "commit-after-transfer-failure",
+        "move_money/storage.py",
+        'connection.execute("ROLLBACK")',
+        'connection.execute("COMMIT")  # Deliberate mutation in a disposable copy only.',
+        "tests/test_transfer_failures.py::test_transfer_failure_rolls_back_balances_record_and_key[after-credit]",
+    ),
 ]
 
 
@@ -92,7 +113,7 @@ def main():
     after = {path: sha256(path.read_bytes()).hexdigest() for path in sources}
     if before != after:
         raise RuntimeError("Actual source changed during the disposable-copy check")
-    print("4/4 selected mutations detected; actual source unchanged")
+    print(f"{len(_MUTATIONS)}/{len(_MUTATIONS)} selected mutations detected; actual source unchanged")
 
 
 if __name__ == "__main__":

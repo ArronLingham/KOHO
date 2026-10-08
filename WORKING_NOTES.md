@@ -232,3 +232,39 @@ and judgments must come from the user; none are attributed to them here.
 - New tests were inspected; whitespace checks passed. No production repair was
   required by these tests. They do not prove every schedule or physical power-loss
   recovery. Milestone: `Verify competing transfers and atomic failure paths`.
+
+## Stage 2 documentation and review checkpoint
+
+- Transfer concurrency/failure milestone committed as `06cfc04` —
+  `Verify competing transfers and atomic failure paths`.
+- Expanded the disposable mutation script to seven selected faults. Actual run:
+  **7/7 detected**, exit code 0; each control passed, each named mutated test failed,
+  and real source hashes were unchanged. New faults ignore a failed debit, skip
+  committed replay, or commit after a transfer failure. No intentionally faulty
+  real source or commit was created, and no AI mistake narrative is implied.
+- Final full suite: `.venv/bin/python -m pytest -q` reported
+  **363 passed in 1.96s**, exit code 0. The named competing-transfer command passed
+  separately: **1 passed in 0.09s**, exit code 0.
+- Repeated the four overlap checks in five fresh pytest invocations to check the
+  coordination mechanism for observed flakiness; all five invocations passed.
+  Repetition is finite schedule evidence, not a general concurrency proof.
+- Executed the exact updated README Python example against a fresh temporary file.
+  It printed balances 2,000/8,000, sequence-1 receipt, identical replay, and one
+  canonical incoming/outgoing history entry. Runtime observed: Python 3.14.7,
+  SQLite 3.53.4. `pip check` exited 0 with no broken requirements; installation
+  commands/dependencies remain those verified during Stage 1.
+- README describes all four operations, input units/bounds, key policies, errors,
+  transaction behavior, tested invariants, limits, and exact executed example/test
+  commands. TEST_PLAN now maps executed evidence and distinguishes remaining
+  process-transfer, recovery, load, and runtime-version checks from passing cases.
+- PostgreSQL remains a possible future choice for many simultaneous writers or
+  shared server access, not an implemented or benchmarked backend. The user selected
+  SQLite and no migration occurred. No client/bank ownership or extra product scope
+  was introduced.
+- Assistant inspected meaningful changes and whitespace checks passed. Planned
+  final milestone message: `Document verified SQLite transfer behavior and evidence`.
+  Stage 2 stops after this commit for user inspection; later stages, the concise
+  final build log, packaging, and submission remain under user control.
+- Actual total assignment elapsed/remaining time and the user's personal review
+  judgment remain unknown. No later-stage completion or unsupported test outcome
+  is being claimed.
