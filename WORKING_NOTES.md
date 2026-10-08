@@ -81,3 +81,17 @@ and judgments must come from the user; none are attributed to them here.
   its already-created features are not being split into invented earlier milestones.
 - Whether to proceed with Stage 2 was asked separately because the user originally
   required a stage prompt before transfer implementation.
+- Baseline milestone created: `0f4beed` — `Add account creation and exact-cent validation`.
+
+## Adversarial input checkpoint
+
+- Added 39 unsupported input cases for each public operation, including numeric/
+  Unicode/SQL-looking strings, booleans, floats/NaN/infinities, containers, numeric
+  wrappers/subclasses, conversion objects, and out-of-range integers. Each rejected
+  operation is checked against a full before/after snapshot of existing accounts.
+- Added four reproducible, seeded 60-operation sequences. A separate Python model
+  predicts balances after each operation and database reopen. Assertions check all
+  accounts, exact integer types, nonnegative/range bounds, and exact opening totals.
+  These are account-operation sequences, not transfer-conservation evidence.
+- `.venv/bin/python -m pytest -q`: **120 passed in 0.35s**, exit code 0.
+- No runtime feature or storage backend changed at this checkpoint.

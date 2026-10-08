@@ -7,16 +7,6 @@ from move_money import AccountNotFound, InvalidInput, MAX_CENTS, MoneyService
 from move_money.storage import _connection, _write_transaction
 
 
-@pytest.fixture
-def database_path(tmp_path):
-    return tmp_path / "accounts.db"
-
-
-@pytest.fixture
-def service(database_path):
-    return MoneyService(database_path)
-
-
 @pytest.mark.parametrize("amount", [0, 1, 10_000, MAX_CENTS])
 def test_open_account_preserves_exact_starting_balance(service, amount):
     account = service.open_account(amount)
