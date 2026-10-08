@@ -460,3 +460,39 @@ and judgments must come from the user; none are attributed to them here.
   additional write capacity of PostgreSQL. No throughput benchmark is claimed.
 - BUILD_LOG was updated with those supplied facts. The final elapsed-time update
   and any personal shipped concern remain author fields; none are inferred.
+
+## Stage 7 clean-checkout verification
+
+- Documentation milestone committed as `7dd389c`. A separate local clone at
+  `dist/stage7-verification` checked out that exact commit. The main checkout and
+  its existing environment were preserved. The clone used a newly created `.venv`.
+- Exact README setup commands succeeded: `python3 -m venv .venv`, followed by
+  `.venv/bin/python -m pip install --no-cache-dir -e '.[dev]'`, exit codes 0.
+  The authorized dependency install used a fresh environment, not copied packages.
+- Unexpected useful evidence: the clean environment runs **Python 3.12.8 /
+  SQLite 3.45.3**, distinct from the earlier Python 3.14.7 / SQLite 3.53.4 runtime.
+  The tests therefore now cover two actual combinations, not all supported versions.
+- `.venv/bin/python scripts/demo.py`: exit 0, balances 2,000/8,000, one canonical
+  transfer, unchanged replay, expected conflict/insufficient/string errors,
+  conserved total 10,000, and disposable directory removal.
+- `.venv/bin/python -m pytest -q`: **372 passed in 3.32s**, exit 0.
+- Named competing-transfer command: **1 passed in 0.12s**, exit 0.
+  `tests/test_transfer_failures.py`: **6 passed in 0.12s**, exit 0.
+  `tests/test_transfer_processes.py`: **8 passed in 1.13s**, exit 0.
+- `.venv/bin/python scripts/check_test_sensitivity.py`: **8/8 detected**, exit 0;
+  every unmodified control passed, every named mutation failed, actual source
+  hashes remained unchanged, and disposable copies were removed.
+- `.venv/bin/python -m pip check`: exit 0, no broken requirements. A cache-directory
+  warning remains environmental; it did not prevent dependency setup or checks.
+- Updated the docs with the actual second runtime and completed clean verification.
+  Next-hour work now concerns varied competition schedules/ledger seeds rather than
+  claiming another runtime is still untested. Production source/tests are unchanged.
+- Bundle creation/verification and its commit identity will be recorded in a local
+  delivery report after this documentation commit. The bundle is a review package
+  while author fields remain, not a claim that personal review/submission is finished.
+  Milestone message: `Record clean checkout verification on Python 3.12`.
+- Clean-checkout README's Python example was extracted and executed in a fresh
+  disposable database: balance=2,000, one outgoing entry, and matching receipt.
+  Markdown fences and local links in README/BUILD_LOG/SUBMISSION/TEST_PLAN checked
+  successfully. No new source/test changes exist relative to the tested `7dd389c`.
+  Whitespace checks passed before the documentation checkpoint was committed.

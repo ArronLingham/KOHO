@@ -47,12 +47,15 @@ No UI, authentication, deployment, or client/bank ownership model was added.
 competition is two 8,000-cent requests against 10,000: one succeeds, one rejects,
 and all balances/history reconcile with total=10,000. Eight selected deliberate
 mutation cases were detected with passing controls. Clean-checkout verification
-and bundle checks are recorded in WORKING_NOTES. Tests cover finite schedules on
-the observed runtime; physical power-loss recovery, all versions, and sustained
-load remain unestablished. Single-writer contention can produce a storage timeout.
+is recorded in WORKING_NOTES; bundle identity/checks are in the local delivery
+report. Clean setup, demo, all 372 cases, focused competition/failure/process checks,
+and 8/8 sensitivity cases passed with Python 3.12.8 / SQLite 3.45.3, alongside
+earlier Python 3.14.7 / SQLite 3.53.4 evidence. Tests cover finite schedules;
+physical power-loss recovery, all versions, and sustained load remain unestablished.
+Single-writer contention can produce a storage timeout.
 [AUTHOR: any shipped choice you personally feel uncomfortable with; explicitly
 say if none, rather than assuming that judgment.]
 
-**Next hour.** Verify another supported Python/SQLite combination and add a focused
-regression for any actual finding. Continue prioritizing the four invariants over
-additional product features.
+**Next hour.** Vary controlled competing-transfer winner order and generated ledger
+seeds, adding a focused regression for any actual finding. Continue prioritizing
+the four invariants over additional product features.

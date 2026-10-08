@@ -80,6 +80,8 @@ These deliberate experiments are not AI mistake narratives.
 
 - Every lock/read/write schedule, sustained load, performance benchmarks, physical
   power-loss/corruption recovery, backups, or all supported runtime versions.
+  Verified combinations are Python 3.14.7 / SQLite 3.53.4 and fresh-checkout
+  Python 3.12.8 / SQLite 3.45.3; this is not a complete version matrix.
 - Production authorization, encryption, client/bank isolation, and multi-currency
   behavior; these are outside the assignment's current local library scope.
 - The author's final README/build-log/submission review and missing personal/time

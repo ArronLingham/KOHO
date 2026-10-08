@@ -6,9 +6,10 @@ in `MoneyService`; the executable demo uses that same public interface.
 
 ## Run and test
 
-Requires Python 3.12+ with SQLite 3.37.0+ (`STRICT` tables). The observed runtime
-is Python 3.14.7 / SQLite 3.53.4. There are no runtime dependencies; pytest 9.1.1
-is the development dependency.
+Requires Python 3.12+ with SQLite 3.37.0+ (`STRICT` tables). Verified combinations
+are Python 3.14.7 / SQLite 3.53.4 and a fresh Python 3.12.8 / SQLite 3.45.3
+environment. There are no runtime dependencies; pytest 9.1.1 is the development
+dependency.
 
 From the repository folder:
 
@@ -45,7 +46,7 @@ Further focused checks:
 .venv/bin/python scripts/check_test_sensitivity.py
 ```
 
-The recorded suite has 372 passing cases. Selected sensitivity checks detected
+The clean-checkout suite passed all 372 cases. Selected sensitivity checks detected
 8/8 deliberate mutations in disposable copies, with passing unmodified controls
 and unchanged actual source. See [TEST_PLAN.md](TEST_PLAN.md) for mapped evidence
 and [WORKING_NOTES.md](WORKING_NOTES.md) for exact executed checkpoints.
@@ -116,12 +117,13 @@ client/bank ownership, and multi-currency conversion were excluded. File access
 depends on operating-system permissions. History has no pagination/timestamps;
 schema changes have no versioned migration tool.
 
-Evidence covers finite controlled schedules on the observed runtime. It does not
-establish every execution, sustained-load performance, physical power-loss or disk
+Evidence covers finite controlled schedules on those two runtime combinations.
+It does not establish every execution, sustained-load performance, physical power-loss or disk
 corruption recovery, backup procedures, or all supported runtime versions. Abrupt
 process exits are not physical power-loss simulations.
 
-The next engineering hour would verify another supported Python/SQLite combination
-and turn any concrete finding into a focused regression. The remaining submission
-step is the author's review of personal/time fields in [BUILD_LOG.md](BUILD_LOG.md).
+The next engineering hour would vary the controlled competing-transfer winner
+order and generated ledger seeds, adding a regression for any concrete finding.
+The remaining submission step is the author's review of personal/time fields in
+[BUILD_LOG.md](BUILD_LOG.md).
 See [SUBMISSION.md](SUBMISSION.md) for delivery checks and the short demo outline.
