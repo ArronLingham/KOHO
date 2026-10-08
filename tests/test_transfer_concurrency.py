@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Event, local
 
+import pytest
+
 from move_money import HistoryEntry, InsufficientFunds, TransferConflict, TransferReceipt
 import move_money.service as service_module
 from move_money.storage import _connection
@@ -61,15 +63,18 @@ def _transfer_rows(database_path):
         return [tuple(row) for row in connection.execute("SELECT * FROM transfers ORDER BY sequence")]
 
 
-def test_competing_transfers_cannot_overspend(service, database_path, monkeypatch):
+@pytest.mark.parametrize("reverse", [False, True], ids=["b-first", "c-first"])
+def test_competing_transfers_cannot_overspend(service, database_path, monkeypatch, reverse):
     a = service.open_account(10_000)
     b = service.open_account(0)
     c = service.open_account(0)
-    outcomes = _overlapping_attempts(
-        monkeypatch, service,
+    requests = [
         ("to-b", a.account_id, b.account_id, 8000),
         ("to-c", a.account_id, c.account_id, 8000),
-    )
+    ]
+    if reverse:
+        requests.reverse()
+    outcomes = _overlapping_attempts(monkeypatch, service, *requests)
     receipts = [outcome for outcome in outcomes if isinstance(outcome, TransferReceipt)]
     failures = [outcome for outcome in outcomes if isinstance(outcome, InsufficientFunds)]
     assert len(outcomes) == 2
@@ -80,6 +85,8 @@ def test_competing_transfers_cannot_overspend(service, database_path, monkeypatc
     assert sum(balances) == 10_000
     assert all(type(balance) is int and balance >= 0 for balance in balances)
     receipt = receipts[0]
+    assert receipt == outcomes[0] == TransferReceipt(1, *requests[0])
+    assert isinstance(outcomes[1], InsufficientFunds)
     assert _transfer_rows(database_path) == [
         (receipt.sequence, receipt.transfer_id, receipt.sender_id, receipt.recipient_id, 8000),
     ]
@@ -87,6 +94,29 @@ def test_competing_transfers_cannot_overspend(service, database_path, monkeypatc
     assert service.get_history(receipt.recipient_id) == [HistoryEntry(receipt, "incoming")]
     loser = c if receipt.recipient_id == b.account_id else b
     assert service.get_history(loser.account_id) == []
+
+
+def test_failed_first_writer_leaves_key_for_waiting_changed_payload(
+    service, database_path, monkeypatch,
+):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    outcomes = _overlapping_attempts(
+        monkeypatch, service,
+        ("reusable", sender.account_id, recipient.account_id, 101),
+        ("reusable", sender.account_id, recipient.account_id, 100),
+    )
+    receipt = TransferReceipt(1, "reusable", sender.account_id, recipient.account_id, 100)
+    assert len(outcomes) == 2
+    assert isinstance(outcomes[0], InsufficientFunds)
+    assert outcomes[1] == receipt
+    with _connection(database_path) as connection:
+        assert [tuple(row) for row in connection.execute("SELECT * FROM accounts ORDER BY account_id")] == [
+            (sender.account_id, 100, 0), (recipient.account_id, 0, 100),
+        ]
+    assert _transfer_rows(database_path) == [(1, "reusable", sender.account_id, recipient.account_id, 100)]
+    assert service.get_history(sender.account_id) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(recipient.account_id) == [HistoryEntry(receipt, "incoming")]
 
 
 def test_concurrent_same_key_returns_one_receipt_and_moves_once(service, database_path, monkeypatch):

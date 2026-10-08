@@ -29,11 +29,13 @@ _MUTATIONS = [
         "tests/test_storage_failures.py::test_failed_multirow_statement_leaves_no_partial_balance_changes",
     ),
     (
-        "omit-commit",
+        "omit-transfer-commit",
         "move_money/storage.py",
         'connection.execute("COMMIT")',
-        "pass  # Deliberate mutation in a disposable copy only.",
-        "tests/test_accounts.py::test_open_account_preserves_exact_starting_balance[10000]",
+        # Initialization changes zero rows and account opening changes one.
+        # Skip only the transaction that debits, credits, and inserts its receipt.
+        'if connection.total_changes != 3:\n            connection.execute("COMMIT")',
+        "tests/test_transfers.py::test_transfer_moves_exact_cents_once[123]",
     ),
     (
         "omit-rollback",
@@ -47,7 +49,7 @@ _MUTATIONS = [
         "move_money/service.py",
         "if debit.rowcount != 1:",
         "if False:  # Deliberate mutation in a disposable copy only.",
-        "tests/test_transfer_concurrency.py::test_competing_transfers_cannot_overspend",
+        "tests/test_transfer_concurrency.py::test_competing_transfers_cannot_overspend[b-first]",
     ),
     (
         "skip-committed-replay",
@@ -68,14 +70,44 @@ _MUTATIONS = [
         "move_money/service.py",
         "if debit.rowcount != 1:",
         "if False:  # Deliberate mutation in a disposable copy only.",
-        "tests/test_transfer_processes.py::test_separate_processes_competing_for_funds_cannot_overspend",
+        "tests/test_transfer_processes.py::test_separate_processes_competing_for_funds_cannot_overspend[c-first]",
     ),
+    (
+        "validate-numeric-inputs-after-key-lookup",
+        "move_money/service.py",
+        '        _validate_integer(sender_id, "sender_id", minimum=1)\n'
+        '        _validate_integer(recipient_id, "recipient_id", minimum=1)\n'
+        '        _validate_integer(amount_cents, "amount_cents", minimum=1)\n',
+        '        with _connection(self._database_path) as lookup:\n'
+        '            committed = lookup.execute(\n'
+        '                "SELECT 1 FROM transfers WHERE transfer_id = ?", (transfer_id,),\n'
+        '            ).fetchone()\n'
+        '        if committed is None:\n'
+        '            _validate_integer(sender_id, "sender_id", minimum=1)\n'
+        '            _validate_integer(recipient_id, "recipient_id", minimum=1)\n'
+        '            _validate_integer(amount_cents, "amount_cents", minimum=1)\n',
+        "tests/test_input_contract.py::test_invalid_transfer_fields_preserve_all_accounts_and_receipts[true-amount_cents-committed-key]",
+    ),
+    *[
+        (
+            f"mutable-{name.lower()}",
+            "move_money/service.py",
+            f"@dataclass(frozen=True)\nclass {name}:",
+            f"@dataclass\nclass {name}:",
+            f"tests/test_history.py::test_returned_values_are_immutable[{target}]",
+        )
+        for name, target in [
+            ("Account", "account-balance_cents-999"),
+            ("TransferReceipt", "receipt-amount_cents-999"),
+            ("HistoryEntry", "entry-direction-incoming"),
+        ]
+    ],
 ]
 
 
 def _run_test(directory, target):
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "--tb=short", target],
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short", target],
         cwd=directory,
         capture_output=True,
         text=True,
@@ -87,9 +119,8 @@ def _run_test(directory, target):
 def main():
     sources = sorted((ROOT / "move_money").glob("*.py"))
     before = {path: sha256(path.read_bytes()).hexdigest() for path in sources}
-    scratch_parent = ROOT / ".venv"
-    if not scratch_parent.is_dir():
-        raise RuntimeError("Create the project's .venv before running this check")
+    scratch_parent = ROOT / "dist"
+    scratch_parent.mkdir(exist_ok=True)
 
     with TemporaryDirectory(prefix="test-sensitivity-", dir=scratch_parent) as scratch:
         for name, relative_path, old, new, target in _MUTATIONS:

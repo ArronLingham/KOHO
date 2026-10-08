@@ -112,17 +112,18 @@ def _full_snapshot(database_path):
         )
 
 
+@pytest.mark.parametrize("transfer_id", ["invalid", "existing"], ids=["new-key", "committed-key"])
 @pytest.mark.parametrize("field", ["sender_id", "recipient_id", "amount_cents"])
 @pytest.mark.parametrize("value", _INVALID_INPUTS + [pytest.param(0, id="zero-integer")])
 def test_invalid_transfer_fields_preserve_all_accounts_and_receipts(
-    service, database_path, field, value,
+    service, database_path, transfer_id, field, value,
 ):
     sender = service.open_account(100)
     recipient = service.open_account(0)
     service.open_account(MAX_CENTS)
     service.transfer("existing", sender.account_id, recipient.account_id, 1)
     before = _full_snapshot(database_path)
-    payload = dict(transfer_id="invalid", sender_id=sender.account_id,
+    payload = dict(transfer_id=transfer_id, sender_id=sender.account_id,
                    recipient_id=recipient.account_id, amount_cents=1)
     payload[field] = value
     with pytest.raises(InvalidInput):

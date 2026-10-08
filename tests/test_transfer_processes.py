@@ -11,6 +11,7 @@ from move_money import (
     TransferConflict, TransferReceipt,
 )
 import move_money.service as service_module
+import move_money.storage as storage_module
 from move_money.storage import _connection
 
 
@@ -129,27 +130,120 @@ def _assert_ledger(service, database_path, receipts):
         assert service.get_history(account_id) == expected_history
 
 
+@pytest.mark.parametrize("reverse", [False, True], ids=["b-first", "c-first"])
 def test_separate_processes_competing_for_funds_cannot_overspend(
-    service, database_path,
+    service, database_path, reverse,
 ):
     a = service.open_account(10_000)
     b = service.open_account(0)
     c = service.open_account(0)
-    outcomes = _overlapping_processes(
-        database_path,
+    requests = [
         ("process-b", a.account_id, b.account_id, 8000),
         ("process-c", a.account_id, c.account_id, 8000),
-    )
+    ]
+    if reverse:
+        requests.reverse()
+    outcomes = _overlapping_processes(database_path, *requests)
     receipts = [outcome for outcome in outcomes if isinstance(outcome, TransferReceipt)]
     failures = [outcome for outcome in outcomes if isinstance(outcome, InsufficientFunds)]
     assert len(outcomes) == 2
     assert len(receipts) == len(failures) == 1
+    assert receipts[0] == outcomes[0] == TransferReceipt(1, *requests[0])
+    assert isinstance(outcomes[1], InsufficientFunds)
     reopened = MoneyService(database_path)
     balances = [reopened.get_balance(account.account_id) for account in (a, b, c)]
     assert balances[0] == 2000
     assert sorted(balances[1:]) == [0, 8000]
     assert sum(balances) == 10_000
     _assert_ledger(reopened, database_path, receipts)
+
+
+def test_separate_processes_failed_first_writer_leaves_key_available(service, database_path):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    outcomes = _overlapping_processes(
+        database_path,
+        ("reusable", sender.account_id, recipient.account_id, 101),
+        ("reusable", sender.account_id, recipient.account_id, 100),
+    )
+    receipt = TransferReceipt(1, "reusable", sender.account_id, recipient.account_id, 100)
+    assert len(outcomes) == 2
+    assert isinstance(outcomes[0], InsufficientFunds)
+    assert outcomes[1] == receipt
+    reopened = MoneyService(database_path)
+    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [0, 100]
+    _assert_ledger(reopened, database_path, [receipt])
+
+
+def _initialization_worker(database_path, role, channel):
+    try:
+        original_transaction = storage_module._write_transaction
+
+        @contextmanager
+        def coordinated_transaction(connection):
+            if role == "second":
+                def trace(statement):
+                    if statement == "BEGIN IMMEDIATE":
+                        channel.send(("begin-attempt", os.getpid()))
+                connection.set_trace_callback(trace)
+            with original_transaction(connection):
+                if role == "first":
+                    channel.send(("writer-held", os.getpid()))
+                    _message(channel, "release")
+                yield
+
+        # Initialization uses the storage module's transaction, before any service exists.
+        storage_module._write_transaction = coordinated_transaction
+        channel.send(("ready", os.getpid()))
+        _message(channel, "start")
+        MoneyService(database_path)
+        channel.send(("initialized", os.getpid()))
+    except BaseException as error:
+        channel.send(("unexpected-error", type(error).__name__, str(error)))
+        raise
+    finally:
+        channel.close()
+
+
+def test_separate_processes_initialize_the_same_new_database(database_path):
+    assert not database_path.exists()
+    context = get_context("spawn")
+    processes, channels = [], []
+    try:
+        for role in ("first", "second"):
+            parent, child = context.Pipe()
+            process = context.Process(target=_initialization_worker,
+                                      args=(str(database_path), role, child))
+            process.start()
+            child.close()
+            processes.append(process)
+            channels.append(parent)
+        pids = [_message(channel, "ready")[1] for channel in channels]
+        assert len(set(pids + [os.getpid()])) == 3
+        assert pids == [process.pid for process in processes]
+        channels[0].send(("start",))
+        assert _message(channels[0], "writer-held")[1] == pids[0]
+        channels[1].send(("start",))
+        assert _message(channels[1], "begin-attempt")[1] == pids[1]
+        assert all(process.is_alive() for process in processes)
+        assert not any(channel.poll() for channel in channels)
+        channels[0].send(("release",))
+        assert [_message(channel, "initialized")[1] for channel in channels] == pids
+        for process in processes:
+            process.join(timeout=10)
+            assert not process.is_alive()
+            assert process.exitcode == 0
+    finally:
+        _cleanup(processes, channels)
+
+    service = MoneyService(database_path)
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    assert (sender.account_id, recipient.account_id) == (1, 2)
+    receipt = service.transfer("initialized", 1, 2, 75)
+    assert receipt == TransferReceipt(1, "initialized", 1, 2, 75)
+    assert [service.get_balance(1), service.get_balance(2)] == [25, 75]
+    _assert_ledger(service, database_path, [receipt])
 
 
 def test_separate_processes_same_key_move_once(service, database_path):

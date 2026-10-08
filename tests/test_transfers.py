@@ -1,19 +1,42 @@
+from contextlib import closing
 import sqlite3
 
 import pytest
 
 from move_money import (
-    AccountNotFound, BalanceOverflow, InsufficientFunds, InvalidInput, MAX_CENTS,
+    AccountNotFound, BalanceOverflow, HistoryEntry, InsufficientFunds, InvalidInput, MAX_CENTS,
     MoneyService, TransferConflict, TransferReceipt,
 )
 
 
 def snapshot(database_path):
-    with sqlite3.connect(database_path) as connection:
+    with closing(sqlite3.connect(database_path)) as connection:
         return (
             connection.execute("SELECT * FROM accounts ORDER BY account_id").fetchall(),
             connection.execute("SELECT * FROM transfers ORDER BY sequence").fetchall(),
         )
+
+
+def test_snapshot_closes_its_connection(service, database_path, monkeypatch):
+    service.open_account(100)
+    connections = []
+    original_connect = sqlite3.connect
+
+    def tracked_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, "connect", tracked_connect)
+            assert snapshot(database_path) == ([(1, 100, 100)], [])
+        assert len(connections) == 1
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            connections[0].execute("SELECT 1")
+    finally:
+        for connection in connections:
+            connection.close()
 
 
 @pytest.mark.parametrize("amount", [1, 123, 10_000, MAX_CENTS])
@@ -94,6 +117,45 @@ def test_replay_returns_original_receipt_even_after_funds_change(service, databa
     reopened = MoneyService(database_path)
     assert reopened.transfer("stable", sender.account_id, recipient.account_id, 100) == original
     assert snapshot(database_path) == before
+
+
+def test_replay_precedes_recipient_overflow_check(service, database_path):
+    sender = service.open_account(1)
+    recipient = service.open_account(0)
+    funder = service.open_account(MAX_CENTS - 1)
+    receipt = service.transfer("replay", sender.account_id, recipient.account_id, 1)
+    service.transfer("fill", funder.account_id, recipient.account_id, MAX_CENTS - 1)
+    before = snapshot(database_path)
+
+    assert MoneyService(database_path).transfer("replay", sender.account_id, recipient.account_id, 1) == receipt
+    assert snapshot(database_path) == before
+
+
+@pytest.mark.parametrize("payload,error", [
+    (("reusable", 1, 999, 1), AccountNotFound),
+    (("reusable", 1, 1, 1), InvalidInput),
+    (("reusable", 1, 2, 1), BalanceOverflow),
+])
+def test_business_rejection_leaves_key_available_for_changed_payload(
+    service, database_path, payload, error,
+):
+    service.open_account(100)
+    service.open_account(MAX_CENTS)
+    service.open_account(0)
+    before = snapshot(database_path)
+    with pytest.raises(error):
+        service.transfer(*payload)
+    assert snapshot(database_path) == before
+
+    receipt = service.transfer("reusable", 2, 3, 1)
+    assert receipt == TransferReceipt(1, "reusable", 2, 3, 1)
+    assert snapshot(database_path) == (
+        [(1, 100, 100), (2, MAX_CENTS, MAX_CENTS - 1), (3, 0, 1)],
+        [(1, "reusable", 2, 3, 1)],
+    )
+    assert service.get_history(1) == []
+    assert service.get_history(2) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(3) == [HistoryEntry(receipt, "incoming")]
 
 
 @pytest.mark.parametrize("sender_id,recipient_id,amount", [

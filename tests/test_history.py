@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from move_money import (
@@ -11,6 +13,40 @@ def test_opening_funding_is_not_a_transfer(service):
     empty = service.open_account(0)
     assert service.get_history(funded.account_id) == []
     assert service.get_history(empty.account_id) == []
+
+
+@pytest.mark.parametrize("target,field,replacement", [
+    ("account", "balance_cents", 999),
+    ("receipt", "amount_cents", 999),
+    ("entry", "direction", "incoming"),
+    ("nested-receipt", "amount_cents", 999),
+])
+def test_returned_values_are_immutable(service, target, field, replacement):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    receipt = service.transfer("immutable", sender.account_id, recipient.account_id, 1)
+    entry = service.get_history(sender.account_id)[0]
+    values = {"account": sender, "receipt": receipt, "entry": entry,
+              "nested-receipt": entry.transfer}
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(values[target], field, replacement)
+
+    assert service.get_balance(sender.account_id) == 99
+    assert service.get_balance(recipient.account_id) == 1
+    assert service.get_history(sender.account_id) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(recipient.account_id) == [HistoryEntry(receipt, "incoming")]
+
+
+def test_mutating_returned_history_list_does_not_change_stored_history(service):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    receipt = service.transfer("detached", sender.account_id, recipient.account_id, 1)
+    entries = service.get_history(sender.account_id)
+    entries.clear()
+
+    assert service.get_history(sender.account_id) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(recipient.account_id) == [HistoryEntry(receipt, "incoming")]
 
 
 def test_missing_account_history_is_an_error(service):

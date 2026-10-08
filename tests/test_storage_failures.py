@@ -10,6 +10,7 @@ from threading import Barrier
 import pytest
 
 from move_money import InvalidInput
+import move_money.storage as storage_module
 from move_money.storage import _connection, _write_transaction
 
 
@@ -189,3 +190,41 @@ with _connection(Path(sys.argv[1])) as connection:
     assert all(opening == balance for _, opening, balance in rows)
     with _connection(database_path) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+@pytest.mark.parametrize("operation", ["get_balance", "get_history"])
+def test_public_reads_propagate_lock_errors(service, database_path, monkeypatch, operation):
+    service.open_account(100)
+    before = _balances(database_path)
+    monkeypatch.setattr(storage_module, "LOCK_TIMEOUT_SECONDS", 0.02)
+    with _connection(database_path) as holder:
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            with pytest.raises(sqlite3.OperationalError) as failure:
+                getattr(service, operation)(1)
+            assert failure.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        finally:
+            holder.execute("ROLLBACK")
+    assert _balances(database_path) == before
+    assert service.get_history(1) == []
+
+
+def test_open_account_commit_failure_preserves_state(service, database_path, monkeypatch):
+    service.open_account(100)
+    before = _balances(database_path)
+    monkeypatch.setattr(storage_module, "LOCK_TIMEOUT_SECONDS", 0.02)
+    with _connection(database_path) as reader:
+        assert reader.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM accounts").fetchall()
+        try:
+            with pytest.raises(sqlite3.OperationalError) as failure:
+                service.open_account(99)
+            assert failure.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        finally:
+            reader.execute("ROLLBACK")
+    assert _balances(database_path) == before
+    account = service.open_account(99)
+    assert account.account_id == 2
+    assert _balances(database_path) == [(1, 100, 100), (2, 99, 99)]
+    assert service.get_history(1) == service.get_history(2) == []

@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from move_money import HistoryEntry, MoneyService
+from move_money import HistoryEntry, MoneyService, TransferReceipt
 import move_money.service as service_module
 import move_money.storage as storage_module
 from move_money.storage import _connection, _write_transaction
@@ -116,3 +116,104 @@ def test_transfer_begin_timeout_preserves_balances_and_retry_key(service, databa
     assert receipt.sequence == 1
     assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [25, 75]
     assert len(_state(database_path)[1]) == 1
+
+
+@pytest.mark.parametrize("exception_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("phase", ["after-debit", "after-credit", "after-record"])
+def test_interruption_after_completed_transfer_statement_restores_state_and_key(
+    service, database_path, monkeypatch, exception_type, phase,
+):
+    service.open_account(100)
+    service.open_account(0)
+    before = _state(database_path)
+    original_connection = service_module._connection
+    checkpoints = []
+    statement_prefix = {
+        "after-debit": "UPDATE accounts SET balance_cents = balance_cents -",
+        "after-credit": "UPDATE accounts SET balance_cents = balance_cents +",
+        "after-record": "INSERT INTO transfers",
+    }[phase]
+
+    class InterruptingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def execute(self, statement, parameters=()):
+            cursor = self.connection.execute(statement, parameters)
+            if statement.startswith(statement_prefix):
+                if phase == "after-record":
+                    # Complete RETURNING before inspecting the actual inserted row.
+                    assert cursor.fetchone() is not None
+                    cursor.close()
+                checkpoints.append((
+                    self.connection.in_transaction,
+                    [tuple(row) for row in self.connection.execute("SELECT * FROM accounts ORDER BY account_id")],
+                    [tuple(row) for row in self.connection.execute("SELECT * FROM transfers ORDER BY sequence")],
+                ))
+                raise exception_type("injected after completed statement")
+            return cursor
+
+    @contextmanager
+    def instrumented_connection(path):
+        with original_connection(path) as connection:
+            yield InterruptingConnection(connection)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "_connection", instrumented_connection)
+        with pytest.raises(exception_type, match="injected after completed statement"):
+            service.transfer("interrupted", 1, 2, 75)
+
+    assert checkpoints == [(
+        True,
+        [(1, 100, 25), (2, 0, 0 if phase == "after-debit" else 75)],
+        [(1, "interrupted", 1, 2, 75)] if phase == "after-record" else [],
+    )]
+    assert _state(database_path) == before
+    assert service.get_history(1) == service.get_history(2) == []
+    receipt = service.transfer("interrupted", 1, 2, 75)
+    assert receipt == TransferReceipt(1, "interrupted", 1, 2, 75)
+    assert _state(database_path) == ([(1, 100, 25), (2, 0, 75)], [(1, "interrupted", 1, 2, 75)])
+    assert service.get_history(1) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(2) == [HistoryEntry(receipt, "incoming")]
+
+
+def test_sqlite_full_during_record_insertion_restores_state_and_key(service, database_path, monkeypatch):
+    service.open_account(100)
+    service.open_account(0)
+    before = _state(database_path)
+    original_connection = service_module._connection
+    statements = []
+    failed_connections = []
+
+    @contextmanager
+    def limited_connection(path):
+        with original_connection(path) as connection:
+            pages = connection.execute("PRAGMA page_count").fetchone()[0]
+            connection.execute(f"PRAGMA max_page_count = {pages}")
+            connection.set_trace_callback(statements.append)
+            try:
+                yield connection
+            finally:
+                failed_connections.append(connection.in_transaction)
+
+    # This valid key needs more pages than the existing schema has allocated.
+    key = "large-key-" + "x" * 100_000
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "_connection", limited_connection)
+        with pytest.raises(sqlite3.OperationalError) as failure:
+            service.transfer(key, 1, 2, 75)
+        assert failure.value.sqlite_errorcode == sqlite3.SQLITE_FULL
+
+    assert sum(statement.startswith("UPDATE accounts") for statement in statements) == 2
+    assert any(statement.startswith("INSERT INTO transfers") for statement in statements)
+    assert failed_connections == [False]
+    assert _state(database_path) == before
+    assert service.get_history(1) == service.get_history(2) == []
+    receipt = service.transfer(key, 1, 2, 75)
+    assert receipt == TransferReceipt(1, key, 1, 2, 75)
+    assert _state(database_path) == ([(1, 100, 25), (2, 0, 75)], [(1, key, 1, 2, 75)])
+    assert service.get_history(1) == [HistoryEntry(receipt, "outgoing")]
+    assert service.get_history(2) == [HistoryEntry(receipt, "incoming")]
