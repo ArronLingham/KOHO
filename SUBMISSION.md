@@ -11,7 +11,9 @@
   repository history; local databases, environments, caches, and the personal
   planning packet are excluded. Bundle verification instructions are below.
 - If tracked files change after packaging, commit the changes and recreate/verify
-  the bundle. The existing bundle does not include later edits.
+  the bundle using `git bundle create dist/move-money-review.bundle main HEAD`.
+  Select the project branch explicitly: `--all` also includes app-generated refs.
+  The existing bundle does not include later edits.
 - Send only after author review and explicit authorization. Nothing has been
   published or sent by this project workflow.
 

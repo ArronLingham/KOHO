@@ -37,6 +37,12 @@ This was misleading communication, not an identified incorrect transfer
 implementation. No concrete incorrect money implementation was found in the
 recorded review, and deliberate mutation experiments are not accidental AI mistakes.
 
+AI also initially packaged Git with `--all`, assuming only the project branch was
+relevant. Bundle verification exposed app-generated snapshot refs alongside `main`.
+Packaging was corrected to explicitly select `main` and `HEAD`, retaining all real
+branch commits without exporting those internal snapshots. No history was rewritten
+and the initial package was not sent.
+
 **Scope decision.** The assistant raised a possible combined balance/history
 snapshot report. The author directed work back to the brief and deferred extras.
 Separate balance and history operations were retained. SQLite was also explicitly

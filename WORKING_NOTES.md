@@ -496,3 +496,20 @@ and judgments must come from the user; none are attributed to them here.
   Markdown fences and local links in README/BUILD_LOG/SUBMISSION/TEST_PLAN checked
   successfully. No new source/test changes exist relative to the tested `7dd389c`.
   Whitespace checks passed before the documentation checkpoint was committed.
+
+## Stage 7 packaging correction
+
+- Clean-verification documentation committed as `1ee618a`. The first local review
+  bundle used `--all HEAD`; `git bundle verify` succeeded structurally but listed
+  two app-generated `refs/codex/turn-diffs/...` refs as well as main/HEAD. Assuming
+  `--all` meant only the real branch was incorrect. The package was never sent.
+- The first bundle restored successfully, and `git fsck --full` passed, but its
+  ref scope is unsuitable for the intended handoff. Packaging is being narrowed
+  explicitly to `main HEAD`; genuine branch history is preserved, not rewritten.
+- BUILD_LOG records this actual packaging mistake and how verification caught it.
+  SUBMISSION documents explicit branch selection for future repackaging. No
+  production money-code repair or invented failure story is involved.
+- The final branch bundle will be verified/restored and identified in the local
+  delivery report. The initial broader bundle and its disposable review checkout
+  will be removed after the corrected package is checked.
+  Milestone message: `Limit submission bundle to the real project branch`.
