@@ -268,3 +268,34 @@ and judgments must come from the user; none are attributed to them here.
 - Actual total assignment elapsed/remaining time and the user's personal review
   judgment remain unknown. No later-stage completion or unsupported test outcome
   is being claimed.
+
+## Stage 3 authorization and process concurrency checkpoint
+
+- The user said `proceed` after the Stage 2 stop. This advances Stage 3 only using
+  the confirmed SQLite backend, with one assistant agent and no extra product scope.
+- Proposed budget: 25 minutes. Actual total assignment elapsed/remaining time is
+  still unknown. Expected new evidence: overlapping separate-process transfers,
+  actual process termination during transfer, and selected mutation sensitivity.
+- Git was clean at the Stage 2 head `2d83cb6`. Before edits, the full suite reported
+  **363 passed in 1.79s**, exit code 0. Existing thread races, precision, validation,
+  retries, conflicts, and transfer rollback evidence remain in the suite.
+- Added three tests using Python's `spawn` start method. Two independent process IDs
+  distinct from the test parent are confirmed. Each child constructs its own service
+  and opens its connection locally against the same temporary database file.
+- Bounded pipe messages confirm both children are ready, the first holds its real
+  writer transaction, and the second traces its actual `BEGIN IMMEDIATE` attempt
+  before the first is released. Every outcome and clean exit is required. Unexpected
+  exceptions, SQLite lock failures, EOF, missing messages, and timeouts fail checks;
+  leftover children are terminated in test cleanup.
+- Required competing-funds scenario asserts one receipt and one insufficient-funds
+  error, A=2,000, destinations 8,000/0, conserved total=10,000, one row, and exact
+  opening/history reconciliation after reopen. Same-key and changed-payload cases
+  also run across these processes. SQLite integrity and foreign-key checks pass.
+- Focused command `.venv/bin/python -m pytest -q tests/test_transfer_processes.py`:
+  **3 passed in 0.30s**, exit code 0. Full suite:
+  **366 passed in 2.06s**, exit code 0. The added file was inspected and
+  `git diff --check` passed before this milestone commit.
+- No production source changes or repairs were necessary. Coordination deliberately
+  orders which process wins; this tests actual cross-process contention, not every
+  schedule, sustained load, or host/storage failure. Milestone message:
+  `Verify transfer contention and retries across separate processes`.
