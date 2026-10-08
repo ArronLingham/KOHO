@@ -54,3 +54,19 @@ atomic transfers, stable receipts, retry/conflict handling, and successful-trans
 history, then verify competing transfers using independent connections.
 
 See [WORKING_NOTES.md](WORKING_NOTES.md) for factual development checkpoints.
+
+## Verification scope
+
+The expanded Stage 1 suite includes adversarial inputs, generated account request
+sequences, SQLite lock/commit failures, rollback, concurrent account creation, and
+child-process exit before/after commit. Transfers and their four invariants remain
+pending. See [TEST_PLAN.md](TEST_PLAN.md) for the evidence matrix and acceptance plan.
+
+To check that selected tests detect intentionally weakened code in disposable copies:
+
+```sh
+.venv/bin/python scripts/check_test_sensitivity.py
+```
+
+This experiment checks four selected mutations and preserves actual source files.
+It is not an accidental AI mistake or proof of every possible fault.

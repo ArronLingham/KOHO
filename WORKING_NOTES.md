@@ -117,3 +117,24 @@ and judgments must come from the user; none are attributed to them here.
 - A separate test demonstrates SQLite STRICT's permitted lossless numeric-string
   conversion while requiring the public account API to reject the same string.
 - `.venv/bin/python -m pytest -q`: **130 passed in 0.53s**, exit code 0.
+- Storage-test milestone created: `27548e1` —
+  `Verify SQLite contention rollback and process-exit behavior`.
+
+## Test-sensitivity and final review checkpoint
+
+- Added `scripts/check_test_sensitivity.py`. It copies source/tests into temporary
+  directories inside the ignored `.venv`, runs an unmodified control, applies one
+  deliberate mutation to the copy, and requires the named test to fail with pytest
+  exit code 1. Collection errors and a failing unmodified control do not count.
+- `.venv/bin/python scripts/check_test_sensitivity.py`: exit code 0. **4/4 selected
+  mutations detected**: accepting booleans, allowing negative stored balances,
+  omitting commit, and omitting rollback. All four controls passed. Source hashes
+  matched before/after, and disposable copies were removed. These are planned test
+  experiments, not observed AI mistakes or complete mutation coverage.
+- Final `.venv/bin/python -m pytest -q`: **130 passed in 0.60s**, exit code 0.
+- `TEST_PLAN.md` records executable foundation evidence, pending scenarios for all
+  four transfer rules, and the user's requested verification/small-commit policy.
+  README now links the matrix and the executed test-sensitivity command.
+- No runtime implementation repair was required by the observed new tests.
+  No transfer/history feature or backend migration was performed. No personal
+  judgment, actual total assignment time, or new AI-mistake story was invented.
