@@ -528,3 +528,16 @@ and judgments must come from the user; none are attributed to them here.
   detected**, exit 0; unmodified controls passed and actual source was unchanged.
 - `git diff --check`: exit 0 before this working-note addition. Production code
   and tests were not changed for this documentation update.
+
+## README scope and next-step checkpoint
+
+- The author requested short explanations of omitted features and future work.
+  README now describes the current scope exclusions and proposes broader
+  correctness checks, a CLI wrapper, and conditional larger-service planning.
+- Future CLI and PostgreSQL work is described as proposed work; the current
+  implementation remains the Python/SQLite library and its predefined demo.
+- `.venv/bin/python -m pytest -q`: **520 passed in 3.81s**, exit 0.
+- `.venv/bin/python scripts/demo.py`: exit 0; balances 2,000/8,000, conserved
+  total 10,000, successful replay/rejection checks, temporary database removed.
+- `git diff --check`: exit 0 before this note addition. This update changes
+  documentation only; no implementation or test changes were made.
