@@ -95,3 +95,25 @@ and judgments must come from the user; none are attributed to them here.
   These are account-operation sequences, not transfer-conservation evidence.
 - `.venv/bin/python -m pytest -q`: **120 passed in 0.35s**, exit code 0.
 - No runtime feature or storage backend changed at this checkpoint.
+- Input-test milestone created: `3e1c555` —
+  `Exercise adversarial account inputs and generated sequences`.
+
+## Storage-failure checkpoint
+
+- The user answered the scope question: strengthen Stage 1 and stop for review.
+  Transfers/history and their acceptance tests remain pending for later stages.
+- Added real SQLite tests for a blocked `BEGIN IMMEDIATE`, a blocked `COMMIT`,
+  rollback of multiple changes after errors/interruptions, and a failed multirow
+  update. Lock errors must propagate rather than become a business rejection.
+- The commit-contention test shortens its connection's busy timeout to 20 ms,
+  confirms both SQL `COMMIT` and `ROLLBACK` were attempted, checks restored state,
+  then verifies that the connection can successfully perform another transaction.
+- Eight barrier-coordinated threads create accounts with worker-owned connections;
+  all results are collected and identifiers, balances, and opening totals checked.
+  This is account-creation evidence, not the required competing-transfer test.
+- Child processes exit explicitly before or after commit. Reopen checks confirm
+  only committed account writes persist, and SQLite integrity checks return `ok`.
+  This does not simulate physical power loss, disk corruption, or transfer retries.
+- A separate test demonstrates SQLite STRICT's permitted lossless numeric-string
+  conversion while requiring the public account API to reject the same string.
+- `.venv/bin/python -m pytest -q`: **130 passed in 0.53s**, exit code 0.
