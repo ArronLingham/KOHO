@@ -351,3 +351,47 @@ and judgments must come from the user; none are attributed to them here.
 - Stage 3 stops for the user's review. Stage 4 critique, final concise build log,
   packaging, and submission are not being performed in this turn. The user's review
   judgment and actual assignment elapsed/remaining time remain unknown.
+
+## Stage 4 review record and Stage 6 authorization
+
+- The previous Stage 4 turn was read-only. It found no actionable money-correctness
+  defect against the original brief and changed no project files or commits.
+  The fresh suite reported **372 passed in 2.77s**, exit code 0, with bytecode and
+  pytest cache writes disabled for that review.
+- Four additional checks ran in disposable databases outside the project: 16
+  barrier-started callers produced one success and 15 insufficient-funds results
+  with 10,000 cents conserved; replay with an empty sender and maximum recipient
+  changed nothing; a failed key accepted different valid details; a retained
+  single-row RETURNING cursor did not prevent commit. All passed in that turn.
+  These review probes were not added to the committed pytest suite.
+- The user then said `proceed` after being told Stage 6's deterministic demo was
+  next. No Stage 5 repair was identified or manufactured. Stage 6 only is authorized.
+- Proposed budget: 15 minutes. Actual assignment elapsed/remaining time is unknown.
+  The chosen interface remains a library. Scope: one short executable demonstration
+  of existing operations and errors, exact units/receipts, and verified test commands.
+- Git was clean at `596d628` before this stage. Baseline suite:
+  **372 passed in 2.89s**, exit code 0.
+
+## Stage 6 library demonstration checkpoint
+
+- Added `scripts/demo.py`. It creates a fresh temporary database, opens 10,000-cent
+  and zero-cent accounts, transfers 8,000 cents, replays the same receipt, and requests
+  a conflicting amount, an overspend, and an intentionally invalid money string.
+  Business decisions remain in the public service; the demo verifies expected
+  outcomes rather than implementing money rules separately.
+- It checks state after replay and each rejection, prints canonical receipt fields,
+  balances, and one outgoing/incoming history entry, verifies total=10,000 cents,
+  and checks that its disposable directory is removed. Unexpected outcomes raise
+  errors rather than printing a successful completion.
+- `.venv/bin/python scripts/demo.py`: exit code 0. Actual balances were 2,000/8,000,
+  receipt sequence 1 for `demo-payment`, and exactly one successful transfer in both
+  histories. Expected domain errors were TransferConflict, InsufficientFunds, and
+  InvalidInput. The final removal check passed.
+- Two additional fresh executions exited 0, had no stderr, and produced identical
+  stdout. These are actual repeated demo runs, not timing or concurrency evidence.
+- Full suite after adding the demo: **372 passed in 2.91s**, exit code 0.
+  The script was inspected and whitespace checks passed. No redundant formatter
+  tests or production behavior changes were added.
+- First milestone message: `Add deterministic demo of the public money library`.
+  README/demo and focused correctness-check commands remain to be completed within
+  this stage before stopping for the user's review.
