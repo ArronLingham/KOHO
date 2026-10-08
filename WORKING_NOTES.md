@@ -199,3 +199,36 @@ and judgments must come from the user; none are attributed to them here.
 - `.venv/bin/python -m pytest -q`: **345 passed in 1.74s**, exit code 0.
   The changes were inspected and `git diff --check` passed. No production repair
   was required by these checks. Milestone: `Check adversarial transfer inputs against a ledger model`.
+
+## Overlapping transfers and fault-injection checkpoint
+
+- Input/model milestone committed as `a464ce7` —
+  `Check adversarial transfer inputs against a ledger model`.
+- Added four controlled overlap checks on one real temporary database file with
+  independent worker-owned connections. The first caller holds its real writer
+  transaction; SQLite tracing confirms the second attempts `BEGIN IMMEDIATE`
+  while the first is held. Bounded events release the first, and both outcomes are
+  collected. This forces contention at the writer boundary, not simultaneous
+  execution inside SQLite's single-writer transaction.
+- Required scenario: A=10,000, B=C=0; different keys each request 8,000. Assertions
+  require one receipt and one insufficient-funds outcome, A=2,000, destinations
+  8,000/0, conserved total=10,000, one canonical row, and matching histories.
+  Same-key overlap must return identical receipts once; changed payload overlap
+  must conflict without another movement. Opposite-direction transfers both finish.
+- Added SQLite triggers that fail before recipient credit (after debit), before
+  recording (after credit), or after record insertion. Every case requires unchanged
+  accounts/records/history and a successful same-key retry after removing the trigger.
+- A held SQLite reader makes transfer `COMMIT` fail with `SQLITE_BUSY`; tracing
+  confirms both updates, receipt insertion, commit attempt, and rollback. Complete
+  state remains unchanged and the same key later succeeds. The test temporarily
+  shortens its timeout to 20 ms; production remains five seconds.
+- A discarded receipt followed by reopen/retry returns the committed record once.
+  This models caller response loss locally, not a network transport failure.
+- Direct database checks cover transfer amount range/type, foreign keys, distinct
+  accounts, and unique receipt identity. Public validation remains responsible for
+  rejecting losslessly coercible numeric strings and booleans.
+- Initial combined suite: **354 passed in 2.02s**, exit code 0. After adding direct
+  transfer-constraint checks: **363 passed in 2.03s**, exit code 0.
+- New tests were inspected; whitespace checks passed. No production repair was
+  required by these tests. They do not prove every schedule or physical power-loss
+  recovery. Milestone: `Verify competing transfers and atomic failure paths`.
