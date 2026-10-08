@@ -104,6 +104,60 @@ def test_invalid_lookup_preserves_state_and_never_coerces_to_account_one(
     assert _snapshot(database_path) == before
 
 
+def _full_snapshot(database_path):
+    with _connection(database_path) as connection:
+        return (
+            [tuple(row) for row in connection.execute("SELECT * FROM accounts ORDER BY account_id")],
+            [tuple(row) for row in connection.execute("SELECT * FROM transfers ORDER BY sequence")],
+        )
+
+
+@pytest.mark.parametrize("field", ["sender_id", "recipient_id", "amount_cents"])
+@pytest.mark.parametrize("value", _INVALID_INPUTS + [pytest.param(0, id="zero-integer")])
+def test_invalid_transfer_fields_preserve_all_accounts_and_receipts(
+    service, database_path, field, value,
+):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    service.open_account(MAX_CENTS)
+    service.transfer("existing", sender.account_id, recipient.account_id, 1)
+    before = _full_snapshot(database_path)
+    payload = dict(transfer_id="invalid", sender_id=sender.account_id,
+                   recipient_id=recipient.account_id, amount_cents=1)
+    payload[field] = value
+    with pytest.raises(InvalidInput):
+        service.transfer(**payload)
+    assert _full_snapshot(database_path) == before
+
+
+@pytest.mark.parametrize("account_id", _INVALID_INPUTS)
+def test_invalid_history_lookup_preserves_all_state(service, database_path, account_id):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    service.transfer("existing", sender.account_id, recipient.account_id, 1)
+    before = _full_snapshot(database_path)
+    with pytest.raises(InvalidInput):
+        service.get_history(account_id)
+    assert _full_snapshot(database_path) == before
+
+
+class StringSubclass(str):
+    pass
+
+
+@pytest.mark.parametrize("key", [
+    None, True, False, 1, 1.0, b"key", [], {}, object(), StringSubclass("key"),
+    "", " ", "\t\n", "\u2003", "\x00", "key\x00suffix", "\ud800",
+])
+def test_invalid_transfer_keys_preserve_all_state(service, database_path, key):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    before = _full_snapshot(database_path)
+    with pytest.raises(InvalidInput):
+        service.transfer(key, sender.account_id, recipient.account_id, 1)
+    assert _full_snapshot(database_path) == before
+
+
 @pytest.mark.parametrize("seed", [0, 1, 7, 42])
 def test_generated_request_sequences_match_an_independent_account_model(
     service, database_path, seed

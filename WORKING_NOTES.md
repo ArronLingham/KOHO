@@ -182,3 +182,20 @@ and judgments must come from the user; none are attributed to them here.
 - This milestone is ready to commit as `Expose ordered incoming and outgoing history`.
   Controlled concurrency, injected transfer failures, and wider invalid transfer
   inputs remain to be checked before Stage 2 stops.
+
+## Adversarial transfer and ledger checkpoint
+
+- History milestone committed as `89fd46f` —
+  `Expose ordered incoming and outgoing history`.
+- Applied the existing 39 adversarial values plus integer zero to all three
+  numeric transfer fields. Invalid history IDs and 17 invalid key cases are also
+  checked against complete account/transfer snapshots. This explicitly includes
+  money strings, booleans, floats/NaN/infinity, numeric wrappers, containers,
+  integer subclasses, and conversion objects. Valid text transfer keys are retained.
+- Added four seeded 80-operation transfer/retry/conflict sequences, checked against
+  a separate Python ledger after each operation. Every account, canonical receipt,
+  history direction/order, exact total, bound, and reopen result is compared.
+  These are sequential model checks; they do not establish concurrency behavior.
+- `.venv/bin/python -m pytest -q`: **345 passed in 1.74s**, exit code 0.
+  The changes were inspected and `git diff --check` passed. No production repair
+  was required by these checks. Milestone: `Check adversarial transfer inputs against a ledger model`.
