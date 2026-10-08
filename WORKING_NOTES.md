@@ -299,3 +299,29 @@ and judgments must come from the user; none are attributed to them here.
   orders which process wins; this tests actual cross-process contention, not every
   schedule, sustained load, or host/storage failure. Milestone message:
   `Verify transfer contention and retries across separate processes`.
+
+## Stage 3 interrupted-transfer and visibility checkpoint
+
+- Separate-process concurrency milestone committed as `00b6b88` —
+  `Verify transfer contention and retries across separate processes`.
+- Added child-only connection instrumentation that forwards real SQL, reports the
+  reached boundary and actual transaction state, then calls `os._exit(17)` without
+  Python cleanup. Three cases exit after debit, after credit, or after completed
+  receipt insertion. Each checkpoint confirms the expected uncommitted state;
+  clean parent-side reopen then requires the full original state, no receipt/history,
+  a still-available key, a successful same-key transfer, and reconciled exact totals.
+- A fourth case exits immediately after a successful SQL commit, before the public
+  operation returns a receipt. The checkpoint confirms no active transaction and
+  the committed row. Reopen/retry returns that same receipt and changes nothing.
+- A live child pauses after actual debit. Parent-owned connections still see both
+  original balances and empty histories until release/commit. Afterward both balance
+  changes and the canonical receipt reconcile. No production fault hook was added.
+- Added a public-transfer writer-acquisition timeout check: a real held transaction
+  causes `SQLITE_BUSY`, state/key are unchanged, then the same key succeeds after
+  release. Only this test shortens its connection timeout to 20 ms.
+- Focused process/failure checks: **14 passed in 1.27s**, exit code 0. Full suite:
+  **372 passed in 2.99s**, exit code 0. Diff inspection and
+  `git diff --check` passed. Milestone: `Check transfer process exits and committed visibility`.
+- These are abrupt local process-exit and visibility tests on the observed SQLite
+  runtime, not physical power loss, corruption recovery, or a real network response
+  loss experiment. No production repair or fabricated AI mistake was necessary.

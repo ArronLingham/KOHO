@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from multiprocessing import get_context
 import os
 
+import pytest
+
 from move_money import (
     HistoryEntry, InsufficientFunds, MAX_CENTS, MoneyService,
     TransferConflict, TransferReceipt,
@@ -176,3 +178,161 @@ def test_separate_processes_changed_payload_conflicts(service, database_path):
     reopened = MoneyService(database_path)
     assert [reopened.get_balance(account.account_id) for account in (a, b, c)] == [2000, 8000, 0]
     _assert_ledger(reopened, database_path, [outcomes[0]])
+
+
+def _database_state(connection):
+    return (
+        [tuple(row) for row in connection.execute("SELECT * FROM accounts ORDER BY account_id")],
+        [tuple(row) for row in connection.execute("SELECT * FROM transfers ORDER BY sequence")],
+    )
+
+
+class _CheckpointConnection:
+    """Child-only wrapper that forwards real SQL before pausing or exiting."""
+
+    def __init__(self, connection, phase, channel):
+        self._connection = connection
+        self._phase = phase
+        self._channel = channel
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def execute(self, statement, parameters=()):
+        cursor = self._connection.execute(statement, parameters)
+        debit = statement.startswith("UPDATE accounts SET balance_cents = balance_cents -")
+        credit = statement.startswith("UPDATE accounts SET balance_cents = balance_cents +")
+        record = statement.startswith("INSERT INTO transfers")
+        selected = (
+            (self._phase in ("after-debit", "pause-after-debit") and debit)
+            or (self._phase == "after-credit" and credit)
+            or (self._phase == "after-record" and record)
+            or (self._phase == "after-commit" and statement == "COMMIT")
+        )
+        if selected:
+            if record:
+                # Finish the real RETURNING statement before inspecting/exiting.
+                assert cursor.fetchone() is not None
+                cursor.close()
+            self._channel.send((
+                "checkpoint", self._phase, os.getpid(), self._connection.in_transaction,
+                _database_state(self._connection),
+            ))
+            if self._phase == "pause-after-debit":
+                _message(self._channel, "release")
+            else:
+                # No Python finally blocks or graceful connection close run here.
+                os._exit(17)
+        return cursor
+
+
+def _statement_worker(database_path, request, phase, channel):
+    try:
+        service = MoneyService(database_path)
+        original_connection = service_module._connection
+
+        @contextmanager
+        def instrumented_connection(path):
+            with original_connection(path) as connection:
+                yield _CheckpointConnection(connection, phase, channel)
+
+        service_module._connection = instrumented_connection
+        receipt = service.transfer(*request)
+        channel.send(("outcome", receipt))
+    except BaseException as error:
+        channel.send(("unexpected-error", type(error).__name__, str(error)))
+        raise
+    finally:
+        channel.close()
+
+
+@contextmanager
+def _statement_child(database_path, request, phase):
+    context = get_context("spawn")
+    parent, child = context.Pipe()
+    process = context.Process(
+        target=_statement_worker, args=(str(database_path), request, phase, child),
+    )
+    try:
+        process.start()
+        child.close()
+        yield process, parent
+    finally:
+        child.close()
+        _cleanup([process] if process.pid is not None else [], [parent])
+
+
+@pytest.mark.parametrize("phase", ["after-debit", "after-credit", "after-record"])
+def test_process_exit_during_transfer_restores_state_and_keeps_key_retryable(
+    service, database_path, phase,
+):
+    sender = service.open_account(10_000)
+    recipient = service.open_account(0)
+    request = ("crash-retry", sender.account_id, recipient.account_id, 8000)
+    with _connection(database_path) as connection:
+        before = _database_state(connection)
+    with _statement_child(database_path, request, phase) as (process, channel):
+        _, reached_phase, pid, active_transaction, child_state = _message(channel, "checkpoint")
+        assert reached_phase == phase and pid == process.pid and pid != os.getpid()
+        assert active_transaction is True
+        assert [row[2] for row in child_state[0]] == [2000, 0 if phase == "after-debit" else 8000]
+        assert child_state[1] == ([(1, *request)] if phase == "after-record" else [])
+        process.join(timeout=10)
+        assert not process.is_alive()
+        assert process.exitcode == 17
+
+    reopened = MoneyService(database_path)
+    with _connection(database_path) as connection:
+        assert _database_state(connection) == before
+    _assert_ledger(reopened, database_path, [])
+    receipt = reopened.transfer(*request)
+    assert receipt == TransferReceipt(1, *request)
+    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [2000, 8000]
+    _assert_ledger(reopened, database_path, [receipt])
+
+
+def test_process_exit_after_commit_before_response_replays_once(service, database_path):
+    sender = service.open_account(10_000)
+    recipient = service.open_account(0)
+    request = ("committed-no-response", sender.account_id, recipient.account_id, 8000)
+    with _statement_child(database_path, request, "after-commit") as (process, channel):
+        _, phase, pid, active_transaction, child_state = _message(channel, "checkpoint")
+        assert phase == "after-commit" and pid == process.pid and pid != os.getpid()
+        assert active_transaction is False
+        assert [row[2] for row in child_state[0]] == [2000, 8000]
+        assert child_state[1] == [(1, *request)]
+        process.join(timeout=10)
+        assert not process.is_alive()
+        assert process.exitcode == 17
+
+    reopened = MoneyService(database_path)
+    committed_receipt = TransferReceipt(1, *request)
+    _assert_ledger(reopened, database_path, [committed_receipt])
+    assert reopened.transfer(*request) == committed_receipt
+    with _connection(database_path) as connection:
+        assert _database_state(connection) == child_state
+    _assert_ledger(reopened, database_path, [committed_receipt])
+
+
+def test_separate_reader_cannot_see_debit_before_transfer_commits(service, database_path):
+    sender = service.open_account(10_000)
+    recipient = service.open_account(0)
+    request = ("visible-after-commit", sender.account_id, recipient.account_id, 8000)
+    with _statement_child(database_path, request, "pause-after-debit") as (process, channel):
+        _, phase, pid, active_transaction, child_state = _message(channel, "checkpoint")
+        assert phase == "pause-after-debit" and pid == process.pid and pid != os.getpid()
+        assert active_transaction is True
+        assert [row[2] for row in child_state[0]] == [2000, 0]
+        assert child_state[1] == []
+        assert process.is_alive()
+        # The child has really debited, but independent connections see committed state.
+        assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [10_000, 0]
+        _assert_ledger(service, database_path, [])
+        channel.send(("release",))
+        receipt = _message(channel, "outcome")[1]
+        assert receipt == TransferReceipt(1, *request)
+        process.join(timeout=10)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+    assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [2000, 8000]
+    _assert_ledger(service, database_path, [receipt])

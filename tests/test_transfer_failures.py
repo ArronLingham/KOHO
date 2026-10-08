@@ -8,7 +8,7 @@ import pytest
 from move_money import HistoryEntry, MoneyService
 import move_money.service as service_module
 import move_money.storage as storage_module
-from move_money.storage import _connection
+from move_money.storage import _connection, _write_transaction
 
 
 def _state(database_path):
@@ -99,3 +99,20 @@ def test_committed_transfer_with_discarded_response_replays_after_reopen(service
             receipt.recipient_id, receipt.amount_cents) == committed[1][0]
     assert _state(database_path) == committed
     assert len(reopened.get_history(sender.account_id)) == len(reopened.get_history(recipient.account_id)) == 1
+
+
+def test_transfer_begin_timeout_preserves_balances_and_retry_key(service, database_path, monkeypatch):
+    sender = service.open_account(100)
+    recipient = service.open_account(0)
+    before = _state(database_path)
+    monkeypatch.setattr(storage_module, "LOCK_TIMEOUT_SECONDS", 0.02)
+    with _connection(database_path) as holder:
+        with _write_transaction(holder):
+            with pytest.raises(sqlite3.OperationalError) as failure:
+                service.transfer("busy-retry", sender.account_id, recipient.account_id, 75)
+            assert failure.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+    assert _state(database_path) == before
+    receipt = service.transfer("busy-retry", sender.account_id, recipient.account_id, 75)
+    assert receipt.sequence == 1
+    assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [25, 75]
+    assert len(_state(database_path)[1]) == 1
