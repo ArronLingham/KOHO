@@ -1,8 +1,8 @@
-"""Local SQLite-backed money operations, with all amounts in CAD cents."""
+"""Local SQLite-backed money operations, with public amounts in Decimal CAD dollars."""
 
 from .service import (
     Account, AccountNotFound, BalanceOverflow, HistoryEntry, InsufficientFunds, InvalidInput,
-    MoneyError, MoneyService, TransferConflict, TransferReceipt,
+    MAX_DOLLARS, MoneyError, MoneyService, TransferConflict, TransferReceipt,
 )
 from .storage import MAX_CENTS
 
@@ -14,6 +14,7 @@ __all__ = [
     "InsufficientFunds",
     "InvalidInput",
     "MAX_CENTS",
+    "MAX_DOLLARS",
     "MoneyError",
     "MoneyService",
     "TransferConflict",

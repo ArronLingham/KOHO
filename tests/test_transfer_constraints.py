@@ -1,3 +1,5 @@
+from money_helpers import cents, dollars
+from decimal import Decimal
 import sqlite3
 
 import pytest
@@ -11,8 +13,8 @@ def _stored_transfers(connection):
 
 @pytest.mark.parametrize("amount", [0, -1, 1.5, "not-a-number", None])
 def test_database_rejects_invalid_transfer_amounts(service, database_path, amount):
-    service.open_account(100)
-    service.open_account(0)
+    service.open_account(dollars(100))
+    service.open_account(dollars(0))
     with _connection(database_path) as connection:
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
@@ -20,15 +22,15 @@ def test_database_rejects_invalid_transfer_amounts(service, database_path, amoun
                 "VALUES ('invalid', 1, 2, ?)", (amount,),
             )
         assert _stored_transfers(connection) == []
-    assert [service.get_balance(1), service.get_balance(2)] == [100, 0]
+    assert [service.get_balance(1), service.get_balance(2)] == [dollars(100), dollars(0)]
 
 
 @pytest.mark.parametrize("sender,recipient", [(1, 1), (999, 2), (1, 999)])
 def test_database_rejects_self_or_nonexistent_transfer_accounts(
     service, database_path, sender, recipient,
 ):
-    service.open_account(100)
-    service.open_account(0)
+    service.open_account(dollars(100))
+    service.open_account(dollars(0))
     with _connection(database_path) as connection:
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
@@ -39,9 +41,9 @@ def test_database_rejects_self_or_nonexistent_transfer_accounts(
 
 
 def test_database_unique_key_cannot_replace_a_committed_receipt(service, database_path):
-    service.open_account(100)
-    service.open_account(0)
-    service.transfer("unique", 1, 2, 10)
+    service.open_account(dollars(100))
+    service.open_account(dollars(0))
+    service.transfer("unique", 1, 2, dollars(10))
     with _connection(database_path) as connection:
         before = _stored_transfers(connection)
         with pytest.raises(sqlite3.IntegrityError):
@@ -50,4 +52,4 @@ def test_database_unique_key_cannot_replace_a_committed_receipt(service, databas
                 "VALUES ('unique', 1, 2, 20)"
             )
         assert _stored_transfers(connection) == before
-    assert [service.get_balance(1), service.get_balance(2)] == [90, 10]
+    assert [service.get_balance(1), service.get_balance(2)] == [dollars(90), dollars(10)]

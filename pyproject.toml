@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "move-money"
 version = "0.1.0"
-description = "A small, exact-cent money transfer library"
+description = "An exact Decimal-dollar money transfer library"
 requires-python = ">=3.12"
 dependencies = []
 

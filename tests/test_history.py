@@ -1,3 +1,5 @@
+from money_helpers import cents, dollars
+from decimal import Decimal
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -9,22 +11,22 @@ from move_money import (
 
 
 def test_opening_funding_is_not_a_transfer(service):
-    funded = service.open_account(100)
-    empty = service.open_account(0)
+    funded = service.open_account(dollars(100))
+    empty = service.open_account(dollars(0))
     assert service.get_history(funded.account_id) == []
     assert service.get_history(empty.account_id) == []
 
 
 @pytest.mark.parametrize("target,field,replacement", [
-    ("account", "balance_cents", 999),
-    ("receipt", "amount_cents", 999),
+    ("account", "balance_dollars", Decimal("9.99")),
+    ("receipt", "amount_dollars", Decimal("9.99")),
     ("entry", "direction", "incoming"),
-    ("nested-receipt", "amount_cents", 999),
-])
+    ("nested-receipt", "amount_dollars", Decimal("9.99")),
+], ids=["account-balance", "receipt-amount", "entry-direction", "nested-receipt-amount"])
 def test_returned_values_are_immutable(service, target, field, replacement):
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
-    receipt = service.transfer("immutable", sender.account_id, recipient.account_id, 1)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
+    receipt = service.transfer("immutable", sender.account_id, recipient.account_id, dollars(1))
     entry = service.get_history(sender.account_id)[0]
     values = {"account": sender, "receipt": receipt, "entry": entry,
               "nested-receipt": entry.transfer}
@@ -32,16 +34,16 @@ def test_returned_values_are_immutable(service, target, field, replacement):
     with pytest.raises(FrozenInstanceError):
         setattr(values[target], field, replacement)
 
-    assert service.get_balance(sender.account_id) == 99
-    assert service.get_balance(recipient.account_id) == 1
+    assert service.get_balance(sender.account_id) == dollars(99)
+    assert service.get_balance(recipient.account_id) == dollars(1)
     assert service.get_history(sender.account_id) == [HistoryEntry(receipt, "outgoing")]
     assert service.get_history(recipient.account_id) == [HistoryEntry(receipt, "incoming")]
 
 
 def test_mutating_returned_history_list_does_not_change_stored_history(service):
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
-    receipt = service.transfer("detached", sender.account_id, recipient.account_id, 1)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
+    receipt = service.transfer("detached", sender.account_id, recipient.account_id, dollars(1))
     entries = service.get_history(sender.account_id)
     entries.clear()
 
@@ -56,19 +58,19 @@ def test_missing_account_history_is_an_error(service):
 
 @pytest.mark.parametrize("account_id", [0, -1, True, False, "1", 1.0, None, 2**63])
 def test_invalid_history_account_identifiers(service, account_id):
-    service.open_account(100)
+    service.open_account(dollars(100))
     with pytest.raises(InvalidInput):
         service.get_history(account_id)
 
 
 def test_histories_are_ordered_canonical_and_reconcile_after_reopen(service, database_path):
-    a = service.open_account(1000)
-    b = service.open_account(100)
-    c = service.open_account(0)
-    unrelated = service.open_account(999)
-    first = service.transfer("z-key", a.account_id, b.account_id, 50)
-    second = service.transfer("a-key", b.account_id, c.account_id, 100)
-    third = service.transfer("m-key", c.account_id, a.account_id, 25)
+    a = service.open_account(dollars(1000))
+    b = service.open_account(dollars(100))
+    c = service.open_account(dollars(0))
+    unrelated = service.open_account(dollars(999))
+    first = service.transfer("z-key", a.account_id, b.account_id, dollars(50))
+    second = service.transfer("a-key", b.account_id, c.account_id, dollars(100))
+    third = service.transfer("m-key", c.account_id, a.account_id, dollars(25))
 
     service = MoneyService(database_path)
     assert service.get_history(a.account_id) == [
@@ -86,9 +88,9 @@ def test_histories_are_ordered_canonical_and_reconcile_after_reopen(service, dat
     sightings = {}
     for account in (a, b, c, unrelated):
         entries = service.get_history(account.account_id)
-        calculated = account.starting_balance_cents
+        calculated = account.starting_balance_dollars
         for entry in entries:
-            calculated += entry.transfer.amount_cents * (1 if entry.direction == "incoming" else -1)
+            calculated += entry.transfer.amount_dollars * (1 if entry.direction == "incoming" else -1)
             sightings.setdefault(entry.transfer.transfer_id, []).append(entry)
         assert service.get_balance(account.account_id) == calculated
     assert set(sightings) == {"z-key", "a-key", "m-key"}
@@ -98,32 +100,32 @@ def test_histories_are_ordered_canonical_and_reconcile_after_reopen(service, dat
 
 
 def test_failed_conflicting_and_replayed_requests_add_no_history(service):
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
     with pytest.raises(InsufficientFunds):
-        service.transfer("rejected", sender.account_id, recipient.account_id, 101)
+        service.transfer("rejected", sender.account_id, recipient.account_id, dollars(101))
     assert service.get_history(sender.account_id) == []
     assert service.get_history(recipient.account_id) == []
 
-    receipt = service.transfer("accepted", sender.account_id, recipient.account_id, 100)
+    receipt = service.transfer("accepted", sender.account_id, recipient.account_id, dollars(100))
     for _ in range(3):
-        assert service.transfer("accepted", sender.account_id, recipient.account_id, 100) == receipt
+        assert service.transfer("accepted", sender.account_id, recipient.account_id, dollars(100)) == receipt
     with pytest.raises(TransferConflict):
-        service.transfer("accepted", sender.account_id, recipient.account_id, 99)
+        service.transfer("accepted", sender.account_id, recipient.account_id, dollars(99))
     assert service.get_history(sender.account_id) == [HistoryEntry(receipt, "outgoing")]
     assert service.get_history(recipient.account_id) == [HistoryEntry(receipt, "incoming")]
 
 
 def test_repeated_one_cent_transfers_remain_exact(service):
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
     for index in range(100):
-        service.transfer(f"cent-{index}", sender.account_id, recipient.account_id, 1)
-    assert service.get_balance(sender.account_id) == 0
-    assert service.get_balance(recipient.account_id) == 100
+        service.transfer(f"cent-{index}", sender.account_id, recipient.account_id, dollars(1))
+    assert service.get_balance(sender.account_id) == dollars(0)
+    assert service.get_balance(recipient.account_id) == dollars(100)
     outgoing = service.get_history(sender.account_id)
     incoming = service.get_history(recipient.account_id)
     assert len(outgoing) == len(incoming) == 100
     assert [entry.transfer for entry in outgoing] == [entry.transfer for entry in incoming]
-    assert all(type(entry.transfer.amount_cents) is int and entry.transfer.amount_cents == 1
+    assert all(type(entry.transfer.amount_dollars) is Decimal and entry.transfer.amount_dollars == dollars(1)
                for entry in outgoing)

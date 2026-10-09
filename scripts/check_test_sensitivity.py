@@ -15,11 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 _MUTATIONS = [
     (
+        "normalize-distinct-unicode-keys",
+        "move_money/service.py",
+        '        _validate_transfer_id(transfer_id)\n',
+        '        _validate_transfer_id(transfer_id)\n'
+        '        import unicodedata\n'
+        '        transfer_id = unicodedata.normalize("NFC", transfer_id)\n',
+        "tests/test_transfers.py::test_transfer_keys_are_exact_and_sql_parameters",
+    ),
+    (
         "accept-booleans",
         "move_money/service.py",
         "type(value) is not int",
         "not isinstance(value, int)",
-        "tests/test_input_contract.py::test_invalid_opening_preserves_every_existing_account[true]",
+        "tests/test_input_contract.py::test_invalid_lookup_preserves_state_and_never_coerces_to_account_one[true]",
     ),
     (
         "allow-negative-stored-balances",
@@ -76,17 +85,15 @@ _MUTATIONS = [
         "validate-numeric-inputs-after-key-lookup",
         "move_money/service.py",
         '        _validate_integer(sender_id, "sender_id", minimum=1)\n'
-        '        _validate_integer(recipient_id, "recipient_id", minimum=1)\n'
-        '        _validate_integer(amount_cents, "amount_cents", minimum=1)\n',
+        '        _validate_integer(recipient_id, "recipient_id", minimum=1)\n',
         '        with _connection(self._database_path) as lookup:\n'
         '            committed = lookup.execute(\n'
         '                "SELECT 1 FROM transfers WHERE transfer_id = ?", (transfer_id,),\n'
         '            ).fetchone()\n'
         '        if committed is None:\n'
         '            _validate_integer(sender_id, "sender_id", minimum=1)\n'
-        '            _validate_integer(recipient_id, "recipient_id", minimum=1)\n'
-        '            _validate_integer(amount_cents, "amount_cents", minimum=1)\n',
-        "tests/test_input_contract.py::test_invalid_transfer_fields_preserve_all_accounts_and_receipts[true-amount_cents-committed-key]",
+        '            _validate_integer(recipient_id, "recipient_id", minimum=1)\n',
+        "tests/test_input_contract.py::test_invalid_transfer_fields_preserve_all_accounts_and_receipts[true-sender_id-committed-key]",
     ),
     *[
         (
@@ -97,11 +104,55 @@ _MUTATIONS = [
             f"tests/test_history.py::test_returned_values_are_immutable[{target}]",
         )
         for name, target in [
-            ("Account", "account-balance_cents-999"),
-            ("TransferReceipt", "receipt-amount_cents-999"),
-            ("HistoryEntry", "entry-direction-incoming"),
+            ("Account", "account-balance"),
+            ("TransferReceipt", "receipt-amount"),
+            ("HistoryEntry", "entry-direction"),
         ]
     ],
+    (
+        "round-through-decimal-context",
+        "move_money/service.py",
+        'return Decimal(f"{cents // 100}.{cents % 100:02d}")',
+        "return Decimal(cents) / 100",
+        "tests/test_decimal_dollars.py::test_decimal_context_cannot_round_storage_conversion_or_receipts[1]",
+    ),
+    (
+        "accept-fractional-cents",
+        "move_money/service.py",
+        "if fractional_digits >= len(digits) or any(digits[-fractional_digits:]):",
+        "if False:  # Deliberate mutation in a disposable copy only.",
+        "tests/test_input_contract.py::test_invalid_opening_preserves_every_existing_account[fractional-dollar-cent]",
+    ),
+    (
+        "preserve-binary-float-artifact",
+        "move_money/service.py",
+        "value = Decimal(str(value))",
+        "value = Decimal(value)",
+        "tests/test_decimal_dollars.py::test_numeric_dollar_inputs_preserve_exact_values[12.13]",
+    ),
+    (
+        "accept-floats-too-coarse-for-cents",
+        "move_money/service.py",
+        "if not isfinite(value) or ulp(value) >= 0.01:",
+        "if not isfinite(value):",
+        "tests/test_decimal_dollars.py::test_float_resolution_limit_preserves_exact_decimal_alternative",
+    ),
+    (
+        "compare-unnormalized-float-retry",
+        "move_money/service.py",
+        'if (receipt.sender_id, receipt.recipient_id, existing["amount_cents"]) != (\n'
+        '                        sender_id, recipient_id, amount_cents,\n',
+        'if (receipt.sender_id, receipt.recipient_id, receipt.amount_dollars) != (\n'
+        '                        sender_id, recipient_id, amount_dollars,\n',
+        "tests/test_decimal_dollars.py::test_separate_float_inputs_add_up_exactly",
+    ),
+    (
+        "accept-decimal-subclasses",
+        "move_money/service.py",
+        "type(value) is not Decimal",
+        "not isinstance(value, Decimal)",
+        "tests/test_input_contract.py::test_invalid_opening_preserves_every_existing_account[decimal-subclass]",
+    ),
 ]
 
 
@@ -146,6 +197,13 @@ def main():
             # Exit 1 means test failure; collection/runtime setup errors are not evidence.
             if mutated.returncode != 1 or f"FAILED {target}" not in mutated.stdout:
                 raise RuntimeError(f"Mutation was not detected by its test: {name}\n{mutated.stdout}\n{mutated.stderr}")
+            # This demonstrated gap must fail on persisted ledger behavior,
+            # not an unrelated exception or a changed return value alone.
+            if name == "normalize-distinct-unicode-keys" and (
+                "assert stored == expected" not in mutated.stdout
+                or "At index 0 diff:" not in mutated.stdout
+            ):
+                raise RuntimeError(f"Unicode mutation did not fail its ledger assertion:\n{mutated.stdout}")
             print(f"DETECTED {name}: control passed; mutated test failed")
 
     after = {path: sha256(path.read_bytes()).hexdigest() for path in sources}

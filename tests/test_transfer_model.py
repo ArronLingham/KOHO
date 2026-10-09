@@ -1,5 +1,8 @@
 """Sequential generated requests checked against a separate in-memory ledger."""
 
+from money_helpers import cents, dollars
+from decimal import Decimal
+
 import random
 
 import pytest
@@ -18,7 +21,7 @@ def test_generated_transfers_retries_and_conflicts_match_independent_ledger(
     rng = random.Random(seed)
     opening = {}
     for amount in [10_000, 0, 0, MAX_CENTS, 1]:
-        account = service.open_account(amount)
+        account = service.open_account(dollars(amount))
         opening[account.account_id] = amount
     balances = dict(opening)
     receipts = {}
@@ -29,15 +32,15 @@ def test_generated_transfers_retries_and_conflicts_match_independent_ledger(
             if rng.randrange(2) == 0:
                 actual = service.transfer(
                     expected.transfer_id, expected.sender_id,
-                    expected.recipient_id, expected.amount_cents,
+                    expected.recipient_id, expected.amount_dollars,
                 )
                 assert actual == expected
             else:
-                changed_amount = 1 if expected.amount_cents != 1 else 2
+                changed_amount = 1 if expected.amount_dollars != dollars(1) else 2
                 with pytest.raises(TransferConflict):
                     service.transfer(
                         expected.transfer_id, expected.sender_id,
-                        expected.recipient_id, changed_amount,
+                        expected.recipient_id, dollars(changed_amount),
                     )
         else:
             sender, recipient = rng.sample(list(balances), 2)
@@ -45,13 +48,13 @@ def test_generated_transfers_retries_and_conflicts_match_independent_ledger(
             key = f"request-{step}"
             if balances[sender] < amount:
                 with pytest.raises(InsufficientFunds):
-                    service.transfer(key, sender, recipient, amount)
+                    service.transfer(key, sender, recipient, dollars(amount))
             elif balances[recipient] + amount > MAX_CENTS:
                 with pytest.raises(BalanceOverflow):
-                    service.transfer(key, sender, recipient, amount)
+                    service.transfer(key, sender, recipient, dollars(amount))
             else:
-                expected = TransferReceipt(len(receipts) + 1, key, sender, recipient, amount)
-                assert service.transfer(key, sender, recipient, amount) == expected
+                expected = TransferReceipt(len(receipts) + 1, key, sender, recipient, dollars(amount))
+                assert service.transfer(key, sender, recipient, dollars(amount)) == expected
                 balances[sender] -= amount
                 balances[recipient] += amount
                 receipts[key] = expected
@@ -67,7 +70,7 @@ def test_generated_transfers_retries_and_conflicts_match_independent_ledger(
             )]
         assert accounts == [(account_id, opening[account_id], balance)
                             for account_id, balance in sorted(balances.items())]
-        assert records == [(r.sequence, r.transfer_id, r.sender_id, r.recipient_id, r.amount_cents)
+        assert records == [(r.sequence, r.transfer_id, r.sender_id, r.recipient_id, cents(r.amount_dollars))
                            for r in receipts.values()]
         assert all(type(balance) is int and 0 <= balance <= MAX_CENTS for balance in balances.values())
         assert sum(balances.values()) == sum(opening.values())
@@ -77,4 +80,4 @@ def test_generated_transfers_retries_and_conflicts_match_independent_ledger(
                 for r in receipts.values() if account_id in (r.sender_id, r.recipient_id)
             ]
             assert service.get_history(account_id) == expected_history
-            assert service.get_balance(account_id) == balance
+            assert service.get_balance(account_id) == dollars(balance)

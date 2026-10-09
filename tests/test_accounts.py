@@ -1,3 +1,4 @@
+from money_helpers import cents, dollars
 from decimal import Decimal
 import sqlite3
 
@@ -9,22 +10,22 @@ from move_money.storage import _connection, _write_transaction
 
 @pytest.mark.parametrize("amount", [0, 1, 10_000, MAX_CENTS])
 def test_open_account_preserves_exact_starting_balance(service, amount):
-    account = service.open_account(amount)
+    account = service.open_account(dollars(amount))
 
     assert type(account.account_id) is int
     assert account.account_id > 0
-    assert account.starting_balance_cents == amount
-    assert account.balance_cents == amount
-    assert service.get_balance(account.account_id) == amount
-    assert type(service.get_balance(account.account_id)) is int
+    assert account.starting_balance_dollars == dollars(amount)
+    assert account.balance_dollars == dollars(amount)
+    assert service.get_balance(account.account_id) == dollars(amount)
+    assert type(service.get_balance(account.account_id)) is Decimal
 
 
 @pytest.mark.parametrize(
     "amount",
-    [-1, MAX_CENTS + 1, 1.0, "100", True, False, None, Decimal("1"), 1 + 0j],
+    [-1, MAX_CENTS + 1, 0.001, "100", True, False, None, Decimal("NaN"), 1 + 0j],
 )
 def test_invalid_starting_balance_creates_no_account(service, database_path, amount):
-    with pytest.raises(InvalidInput, match="starting_balance_cents"):
+    with pytest.raises(InvalidInput, match="starting_balance_dollars"):
         service.open_account(amount)
 
     with _connection(database_path) as connection:
@@ -32,21 +33,21 @@ def test_invalid_starting_balance_creates_no_account(service, database_path, amo
 
 
 def test_multiple_accounts_have_distinct_balances(service):
-    first = service.open_account(123)
-    second = service.open_account(456)
+    first = service.open_account(dollars(123))
+    second = service.open_account(dollars(456))
 
     assert first.account_id != second.account_id
-    assert service.get_balance(first.account_id) == 123
-    assert service.get_balance(second.account_id) == 456
+    assert service.get_balance(first.account_id) == dollars(123)
+    assert service.get_balance(second.account_id) == dollars(456)
 
 
 def test_reopening_preserves_accounts_and_allows_another_creation(service, database_path):
-    first = service.open_account(10_001)
+    first = service.open_account(dollars(10_001))
     reopened = MoneyService(database_path)
-    second = reopened.open_account(0)
+    second = reopened.open_account(dollars(0))
 
-    assert reopened.get_balance(first.account_id) == 10_001
-    assert reopened.get_balance(second.account_id) == 0
+    assert reopened.get_balance(first.account_id) == dollars(10_001)
+    assert reopened.get_balance(second.account_id) == dollars(0)
     assert first.account_id != second.account_id
 
 
@@ -57,7 +58,7 @@ def test_missing_account_has_a_domain_error(service):
 
 @pytest.mark.parametrize("account_id", [0, -1, MAX_CENTS + 1, True, False, 1.0, "1", None])
 def test_invalid_account_id_is_rejected_even_when_account_one_exists(service, account_id):
-    account = service.open_account(100)
+    account = service.open_account(dollars(100))
     assert account.account_id == 1
 
     with pytest.raises(InvalidInput, match="account_id"):
@@ -69,7 +70,7 @@ def test_invalid_account_id_is_rejected_even_when_account_one_exists(service, ac
 def test_database_rejects_invalid_money_even_without_service_validation(
     service, database_path, field, value
 ):
-    account = service.open_account(100)
+    account = service.open_account(dollars(100))
     with _connection(database_path) as connection:
         # field comes from this fixed test parameter list, never caller input.
         with pytest.raises(sqlite3.IntegrityError):
@@ -78,21 +79,21 @@ def test_database_rejects_invalid_money_even_without_service_validation(
                 (value, account.account_id),
             )
 
-    assert service.get_balance(account.account_id) == 100
+    assert service.get_balance(account.account_id) == dollars(100)
     with _connection(database_path) as connection:
         row = connection.execute("SELECT * FROM accounts").fetchone()
         assert row["starting_balance_cents"] == 100
 
 
 def test_database_rejects_arithmetic_overflow(service, database_path):
-    account = service.open_account(MAX_CENTS)
+    account = service.open_account(dollars(MAX_CENTS))
     with _connection(database_path) as connection:
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
                 "UPDATE accounts SET balance_cents = balance_cents + 1 WHERE account_id = ?",
                 (account.account_id,),
             )
-    assert service.get_balance(account.account_id) == MAX_CENTS
+    assert service.get_balance(account.account_id) == dollars(MAX_CENTS)
 
 
 def test_connection_settings_are_explicit(service, database_path):

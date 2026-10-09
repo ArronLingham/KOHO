@@ -1,5 +1,8 @@
 """Real SQLite failure paths for the existing account/transaction foundation."""
 
+from money_helpers import cents, dollars
+from decimal import Decimal
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
@@ -26,8 +29,8 @@ def _balances(database_path):
 def test_multiple_writes_roll_back_together_on_error_or_interruption(
     service, database_path, exception_type
 ):
-    sender = service.open_account(200)
-    recipient = service.open_account(0)
+    sender = service.open_account(dollars(200))
+    recipient = service.open_account(dollars(0))
     before = _balances(database_path)
 
     with _connection(database_path) as connection:
@@ -48,7 +51,7 @@ def test_multiple_writes_roll_back_together_on_error_or_interruption(
 
 
 def test_begin_lock_timeout_runs_no_write_body_and_propagates_error(service, database_path):
-    account = service.open_account(100)
+    account = service.open_account(dollars(100))
     body_entered = False
 
     with _connection(database_path) as holder, _connection(database_path) as contender:
@@ -66,11 +69,11 @@ def test_begin_lock_timeout_runs_no_write_body_and_propagates_error(service, dat
             assert body_entered is False
             assert contender.in_transaction is False
 
-    assert service.get_balance(account.account_id) == 75
+    assert service.get_balance(account.account_id) == dollars(75)
 
 
 def test_busy_commit_rolls_back_prior_writes_and_connection_can_be_reused(service, database_path):
-    account = service.open_account(100)
+    account = service.open_account(dollars(100))
     statements = []
 
     with _connection(database_path) as reader, _connection(database_path) as writer:
@@ -100,12 +103,12 @@ def test_busy_commit_rolls_back_prior_writes_and_connection_can_be_reused(servic
                 (account.account_id,),
             )
 
-    assert service.get_balance(account.account_id) == 101
+    assert service.get_balance(account.account_id) == dollars(101)
 
 
 def test_failed_multirow_statement_leaves_no_partial_balance_changes(service, database_path):
-    service.open_account(10)
-    service.open_account(0)
+    service.open_account(dollars(10))
+    service.open_account(dollars(0))
     before = _balances(database_path)
 
     with _connection(database_path) as connection:
@@ -140,7 +143,7 @@ def test_coordinated_account_creation_keeps_ids_unique_and_opening_totals_exact(
     def create(amount):
         start.wait()
         # open_account creates its connection inside this worker thread.
-        return service.open_account(amount)
+        return service.open_account(dollars(amount))
 
     with ThreadPoolExecutor(max_workers=len(amounts)) as workers:
         futures = [workers.submit(create, amount) for amount in amounts]
@@ -159,7 +162,7 @@ def test_coordinated_account_creation_keeps_ids_unique_and_opening_totals_exact(
 def test_process_exit_preserves_only_committed_account_writes(
     service, database_path, commit_before_exit
 ):
-    service.open_account(123)
+    service.open_account(dollars(123))
     script = """
 import os
 from pathlib import Path
@@ -194,7 +197,7 @@ with _connection(Path(sys.argv[1])) as connection:
 
 @pytest.mark.parametrize("operation", ["get_balance", "get_history"])
 def test_public_reads_propagate_lock_errors(service, database_path, monkeypatch, operation):
-    service.open_account(100)
+    service.open_account(dollars(100))
     before = _balances(database_path)
     monkeypatch.setattr(storage_module, "LOCK_TIMEOUT_SECONDS", 0.02)
     with _connection(database_path) as holder:
@@ -210,7 +213,7 @@ def test_public_reads_propagate_lock_errors(service, database_path, monkeypatch,
 
 
 def test_open_account_commit_failure_preserves_state(service, database_path, monkeypatch):
-    service.open_account(100)
+    service.open_account(dollars(100))
     before = _balances(database_path)
     monkeypatch.setattr(storage_module, "LOCK_TIMEOUT_SECONDS", 0.02)
     with _connection(database_path) as reader:
@@ -219,12 +222,12 @@ def test_open_account_commit_failure_preserves_state(service, database_path, mon
         reader.execute("SELECT * FROM accounts").fetchall()
         try:
             with pytest.raises(sqlite3.OperationalError) as failure:
-                service.open_account(99)
+                service.open_account(dollars(99))
             assert failure.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
         finally:
             reader.execute("ROLLBACK")
     assert _balances(database_path) == before
-    account = service.open_account(99)
+    account = service.open_account(dollars(99))
     assert account.account_id == 2
     assert _balances(database_path) == [(1, 100, 100), (2, 99, 99)]
     assert service.get_history(1) == service.get_history(2) == []

@@ -1,6 +1,8 @@
-"""Exact-cent account and transfer operations in a local SQLite database."""
+"""Decimal-dollar operations with exact integer-cent SQLite storage."""
 
 from dataclasses import dataclass
+from decimal import Decimal
+from math import isfinite, ulp
 from pathlib import Path
 import sqlite3
 from typing import Literal
@@ -35,8 +37,8 @@ class TransferConflict(MoneyError):
 @dataclass(frozen=True)
 class Account:
     account_id: int
-    starting_balance_cents: int
-    balance_cents: int
+    starting_balance_dollars: Decimal
+    balance_dollars: Decimal
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,7 @@ class TransferReceipt:
     transfer_id: str
     sender_id: int
     recipient_id: int
-    amount_cents: int
+    amount_dollars: Decimal
 
 
 @dataclass(frozen=True)
@@ -54,10 +56,18 @@ class HistoryEntry:
     direction: Literal["incoming", "outgoing"]
 
 
+def _dollars_from_cents(cents: int) -> Decimal:
+    # Construction from text is exact and independent of the decimal context.
+    return Decimal(f"{cents // 100}.{cents % 100:02d}")
+
+
+MAX_DOLLARS = _dollars_from_cents(MAX_CENTS)
+
+
 def _receipt(row: sqlite3.Row) -> TransferReceipt:
     return TransferReceipt(
         row["sequence"], row["transfer_id"], row["sender_id"],
-        row["recipient_id"], row["amount_cents"],
+        row["recipient_id"], _dollars_from_cents(row["amount_cents"]),
     )
 
 
@@ -65,6 +75,40 @@ def _validate_integer(value: object, field: str, minimum: int) -> None:
     # bool is an int subclass, so isinstance(value, int) is insufficient.
     if type(value) is not int or not minimum <= value <= MAX_CENTS:
         raise InvalidInput(f"{field} must be an integer between {minimum} and {MAX_CENTS}")
+
+
+def _validate_dollars(value: object, field: str, minimum_cents: int) -> int:
+    if type(value) is int:
+        value = Decimal(value)
+    elif type(value) is float:
+        if not isfinite(value) or ulp(value) >= 0.01:
+            raise InvalidInput(f"{field} float must be finite and retain cent-sized differences")
+        # Treat the shortest decimal spelling as the requested dollar amount.
+        # Never use Decimal(value), which preserves the binary approximation.
+        value = Decimal(str(value))
+    minimum = _dollars_from_cents(minimum_cents)
+    if (type(value) is not Decimal or not value.is_finite()
+            or not minimum <= value <= MAX_DOLLARS):
+        raise InvalidInput(
+            f"{field} must be numeric dollars between {minimum} and {MAX_DOLLARS}"
+        )
+    if value.is_zero():
+        return 0
+
+    # Inspect digits rather than multiply/quantize: ambient precision and traps
+    # must never round money or make a valid request fail.
+    _, digits, exponent = value.as_tuple()
+    shift = exponent + 2
+    if shift < 0:
+        fractional_digits = -shift
+        if fractional_digits >= len(digits) or any(digits[-fractional_digits:]):
+            raise InvalidInput(f"{field} must represent a whole number of cents")
+        digits = digits[:-fractional_digits]
+        shift = 0
+    coefficient = 0
+    for digit in digits:
+        coefficient = coefficient * 10 + digit
+    return coefficient * 10**shift
 
 
 def _validate_transfer_id(value: object) -> None:
@@ -85,8 +129,10 @@ class MoneyService:
         self._database_path = Path(database_path).resolve()
         _initialize(self._database_path)
 
-    def open_account(self, starting_balance_cents: int) -> Account:
-        _validate_integer(starting_balance_cents, "starting_balance_cents", minimum=0)
+    def open_account(self, starting_balance_dollars: Decimal | int | float) -> Account:
+        starting_balance_cents = _validate_dollars(
+            starting_balance_dollars, "starting_balance_dollars", minimum_cents=0,
+        )
         with _connection(self._database_path) as connection:
             with _write_transaction(connection):
                 row = connection.execute(
@@ -95,9 +141,10 @@ class MoneyService:
                     (starting_balance_cents, starting_balance_cents),
                 ).fetchone()
                 account_id = row["account_id"]
-        return Account(account_id, starting_balance_cents, starting_balance_cents)
+        dollars = _dollars_from_cents(starting_balance_cents)
+        return Account(account_id, dollars, dollars)
 
-    def get_balance(self, account_id: int) -> int:
+    def get_balance(self, account_id: int) -> Decimal:
         _validate_integer(account_id, "account_id", minimum=1)
         with _connection(self._database_path) as connection:
             row = connection.execute(
@@ -106,7 +153,7 @@ class MoneyService:
             ).fetchone()
         if row is None:
             raise AccountNotFound(f"Account {account_id} does not exist")
-        return row["balance_cents"]
+        return _dollars_from_cents(row["balance_cents"])
 
     def get_history(self, account_id: int) -> list[HistoryEntry]:
         _validate_integer(account_id, "account_id", minimum=1)
@@ -128,12 +175,13 @@ class MoneyService:
         ]
 
     def transfer(
-        self, transfer_id: str, sender_id: int, recipient_id: int, amount_cents: int,
+        self, transfer_id: str, sender_id: int, recipient_id: int,
+        amount_dollars: Decimal | int | float,
     ) -> TransferReceipt:
         _validate_transfer_id(transfer_id)
         _validate_integer(sender_id, "sender_id", minimum=1)
         _validate_integer(recipient_id, "recipient_id", minimum=1)
-        _validate_integer(amount_cents, "amount_cents", minimum=1)
+        amount_cents = _validate_dollars(amount_dollars, "amount_dollars", minimum_cents=1)
 
         with _connection(self._database_path) as connection:
             with _write_transaction(connection):
@@ -142,7 +190,7 @@ class MoneyService:
                 ).fetchone()
                 if existing is not None:
                     receipt = _receipt(existing)
-                    if (receipt.sender_id, receipt.recipient_id, receipt.amount_cents) != (
+                    if (receipt.sender_id, receipt.recipient_id, existing["amount_cents"]) != (
                         sender_id, recipient_id, amount_cents,
                     ):
                         raise TransferConflict("transfer_id already has different details")

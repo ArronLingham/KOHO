@@ -1,5 +1,8 @@
 """Real spawned processes sharing one SQLite file, with bounded coordination."""
 
+from money_helpers import cents, dollars
+from decimal import Decimal
+
 from contextlib import contextmanager
 from multiprocessing import get_context
 import os
@@ -111,18 +114,18 @@ def _assert_ledger(service, database_path, receipts):
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     ordered = sorted(receipts, key=lambda receipt: receipt.sequence)
-    assert transfers == [(r.sequence, r.transfer_id, r.sender_id, r.recipient_id, r.amount_cents)
+    assert transfers == [(r.sequence, r.transfer_id, r.sender_id, r.recipient_id, cents(r.amount_dollars))
                          for r in ordered]
     assert len({receipt.transfer_id for receipt in receipts}) == len(receipts)
     calculated = {account_id: opening for account_id, opening, _ in accounts}
     for receipt in receipts:
-        assert type(receipt.amount_cents) is int and 1 <= receipt.amount_cents <= MAX_CENTS
-        calculated[receipt.sender_id] -= receipt.amount_cents
-        calculated[receipt.recipient_id] += receipt.amount_cents
+        assert type(receipt.amount_dollars) is Decimal and dollars(1) <= receipt.amount_dollars <= dollars(MAX_CENTS)
+        calculated[receipt.sender_id] -= cents(receipt.amount_dollars)
+        calculated[receipt.recipient_id] += cents(receipt.amount_dollars)
     assert sum(balance for _, _, balance in accounts) == sum(opening for _, opening, _ in accounts)
     for account_id, _, balance in accounts:
         assert type(balance) is int and 0 <= balance <= MAX_CENTS
-        assert balance == calculated[account_id] == service.get_balance(account_id)
+        assert dollars(balance) == dollars(calculated[account_id]) == service.get_balance(account_id)
         expected_history = [
             HistoryEntry(r, "outgoing" if r.sender_id == account_id else "incoming")
             for r in ordered if account_id in (r.sender_id, r.recipient_id)
@@ -134,12 +137,12 @@ def _assert_ledger(service, database_path, receipts):
 def test_separate_processes_competing_for_funds_cannot_overspend(
     service, database_path, reverse,
 ):
-    a = service.open_account(10_000)
-    b = service.open_account(0)
-    c = service.open_account(0)
+    a = service.open_account(dollars(10_000))
+    b = service.open_account(dollars(0))
+    c = service.open_account(dollars(0))
     requests = [
-        ("process-b", a.account_id, b.account_id, 8000),
-        ("process-c", a.account_id, c.account_id, 8000),
+        ("process-b", a.account_id, b.account_id, dollars(8000)),
+        ("process-c", a.account_id, c.account_id, dollars(8000)),
     ]
     if reverse:
         requests.reverse()
@@ -152,26 +155,26 @@ def test_separate_processes_competing_for_funds_cannot_overspend(
     assert isinstance(outcomes[1], InsufficientFunds)
     reopened = MoneyService(database_path)
     balances = [reopened.get_balance(account.account_id) for account in (a, b, c)]
-    assert balances[0] == 2000
-    assert sorted(balances[1:]) == [0, 8000]
-    assert sum(balances) == 10_000
+    assert balances[0] == dollars(2000)
+    assert sorted(balances[1:]) == [dollars(0), dollars(8000)]
+    assert sum(balances) == dollars(10_000)
     _assert_ledger(reopened, database_path, receipts)
 
 
 def test_separate_processes_failed_first_writer_leaves_key_available(service, database_path):
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
     outcomes = _overlapping_processes(
         database_path,
-        ("reusable", sender.account_id, recipient.account_id, 101),
-        ("reusable", sender.account_id, recipient.account_id, 100),
+        ("reusable", sender.account_id, recipient.account_id, dollars(101)),
+        ("reusable", sender.account_id, recipient.account_id, dollars(100)),
     )
-    receipt = TransferReceipt(1, "reusable", sender.account_id, recipient.account_id, 100)
+    receipt = TransferReceipt(1, "reusable", sender.account_id, recipient.account_id, dollars(100))
     assert len(outcomes) == 2
     assert isinstance(outcomes[0], InsufficientFunds)
     assert outcomes[1] == receipt
     reopened = MoneyService(database_path)
-    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [0, 100]
+    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [dollars(0), dollars(100)]
     _assert_ledger(reopened, database_path, [receipt])
 
 
@@ -237,40 +240,62 @@ def test_separate_processes_initialize_the_same_new_database(database_path):
         _cleanup(processes, channels)
 
     service = MoneyService(database_path)
-    sender = service.open_account(100)
-    recipient = service.open_account(0)
+    sender = service.open_account(dollars(100))
+    recipient = service.open_account(dollars(0))
     assert (sender.account_id, recipient.account_id) == (1, 2)
-    receipt = service.transfer("initialized", 1, 2, 75)
-    assert receipt == TransferReceipt(1, "initialized", 1, 2, 75)
-    assert [service.get_balance(1), service.get_balance(2)] == [25, 75]
+    receipt = service.transfer("initialized", 1, 2, dollars(75))
+    assert receipt == TransferReceipt(1, "initialized", 1, 2, dollars(75))
+    assert [service.get_balance(1), service.get_balance(2)] == [dollars(25), dollars(75)]
     _assert_ledger(service, database_path, [receipt])
 
 
-def test_separate_processes_same_key_move_once(service, database_path):
-    a = service.open_account(10_000)
-    b = service.open_account(0)
-    request = ("process-same", a.account_id, b.account_id, 8000)
-    outcomes = _overlapping_processes(database_path, request, request)
+@pytest.mark.parametrize("amounts,expected_cents", [
+    pytest.param((dollars(8000), dollars(8000)), 8000, id="identical-decimal"),
+    pytest.param((1, Decimal("1.00")), 100, id="integer-and-decimal"),
+    pytest.param((0.10, Decimal("0.1000")), 10, id="float-and-scaled-decimal"),
+])
+@pytest.mark.parametrize("reverse", [False, True], ids=["first-representation", "second-representation"])
+def test_separate_processes_same_key_move_once(
+    service, database_path, amounts, expected_cents, reverse,
+):
+    a = service.open_account(dollars(10_000))
+    b = service.open_account(dollars(0))
+    requests = [("process-same", a.account_id, b.account_id, amount) for amount in amounts]
+    if reverse:
+        requests.reverse()
+    outcomes = _overlapping_processes(database_path, *requests)
+    receipt = TransferReceipt(1, "process-same", a.account_id, b.account_id, dollars(expected_cents))
+    assert len(outcomes) == 2
     assert all(isinstance(outcome, TransferReceipt) for outcome in outcomes)
-    assert outcomes[0] == outcomes[1]
+    assert outcomes[0] == outcomes[1] == receipt
     reopened = MoneyService(database_path)
-    assert [reopened.get_balance(a.account_id), reopened.get_balance(b.account_id)] == [2000, 8000]
-    _assert_ledger(reopened, database_path, [outcomes[0]])
+    expected = (
+        [(a.account_id, 10_000, 10_000 - expected_cents), (b.account_id, 0, expected_cents)],
+        [(1, "process-same", a.account_id, b.account_id, expected_cents)],
+    )
+    with _connection(database_path) as connection:
+        assert _database_state(connection) == expected
+    _assert_ledger(reopened, database_path, [receipt])
+    for request in requests:
+        assert reopened.transfer(*request) == receipt
+        with _connection(database_path) as connection:
+            assert _database_state(connection) == expected
+        _assert_ledger(reopened, database_path, [receipt])
 
 
 def test_separate_processes_changed_payload_conflicts(service, database_path):
-    a = service.open_account(10_000)
-    b = service.open_account(0)
-    c = service.open_account(0)
+    a = service.open_account(dollars(10_000))
+    b = service.open_account(dollars(0))
+    c = service.open_account(dollars(0))
     outcomes = _overlapping_processes(
         database_path,
-        ("process-identity", a.account_id, b.account_id, 8000),
-        ("process-identity", a.account_id, c.account_id, 8000),
+        ("process-identity", a.account_id, b.account_id, dollars(8000)),
+        ("process-identity", a.account_id, c.account_id, dollars(8000)),
     )
     assert isinstance(outcomes[0], TransferReceipt)
     assert isinstance(outcomes[1], TransferConflict)
     reopened = MoneyService(database_path)
-    assert [reopened.get_balance(account.account_id) for account in (a, b, c)] == [2000, 8000, 0]
+    assert [reopened.get_balance(account.account_id) for account in (a, b, c)] == [dollars(2000), dollars(8000), dollars(0)]
     _assert_ledger(reopened, database_path, [outcomes[0]])
 
 
@@ -360,9 +385,9 @@ def _statement_child(database_path, request, phase):
 def test_process_exit_during_transfer_restores_state_and_keeps_key_retryable(
     service, database_path, phase,
 ):
-    sender = service.open_account(10_000)
-    recipient = service.open_account(0)
-    request = ("crash-retry", sender.account_id, recipient.account_id, 8000)
+    sender = service.open_account(dollars(10_000))
+    recipient = service.open_account(dollars(0))
+    request = ("crash-retry", sender.account_id, recipient.account_id, dollars(8000))
     with _connection(database_path) as connection:
         before = _database_state(connection)
     with _statement_child(database_path, request, phase) as (process, channel):
@@ -370,7 +395,7 @@ def test_process_exit_during_transfer_restores_state_and_keeps_key_retryable(
         assert reached_phase == phase and pid == process.pid and pid != os.getpid()
         assert active_transaction is True
         assert [row[2] for row in child_state[0]] == [2000, 0 if phase == "after-debit" else 8000]
-        assert child_state[1] == ([(1, *request)] if phase == "after-record" else [])
+        assert child_state[1] == ([(1, *request[:3], cents(request[3]))] if phase == "after-record" else [])
         process.join(timeout=10)
         assert not process.is_alive()
         assert process.exitcode == 17
@@ -381,20 +406,20 @@ def test_process_exit_during_transfer_restores_state_and_keeps_key_retryable(
     _assert_ledger(reopened, database_path, [])
     receipt = reopened.transfer(*request)
     assert receipt == TransferReceipt(1, *request)
-    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [2000, 8000]
+    assert [reopened.get_balance(sender.account_id), reopened.get_balance(recipient.account_id)] == [dollars(2000), dollars(8000)]
     _assert_ledger(reopened, database_path, [receipt])
 
 
 def test_process_exit_after_commit_before_response_replays_once(service, database_path):
-    sender = service.open_account(10_000)
-    recipient = service.open_account(0)
-    request = ("committed-no-response", sender.account_id, recipient.account_id, 8000)
+    sender = service.open_account(dollars(10_000))
+    recipient = service.open_account(dollars(0))
+    request = ("committed-no-response", sender.account_id, recipient.account_id, dollars(8000))
     with _statement_child(database_path, request, "after-commit") as (process, channel):
         _, phase, pid, active_transaction, child_state = _message(channel, "checkpoint")
         assert phase == "after-commit" and pid == process.pid and pid != os.getpid()
         assert active_transaction is False
         assert [row[2] for row in child_state[0]] == [2000, 8000]
-        assert child_state[1] == [(1, *request)]
+        assert child_state[1] == [(1, *request[:3], cents(request[3]))]
         process.join(timeout=10)
         assert not process.is_alive()
         assert process.exitcode == 17
@@ -409,9 +434,9 @@ def test_process_exit_after_commit_before_response_replays_once(service, databas
 
 
 def test_separate_reader_cannot_see_debit_before_transfer_commits(service, database_path):
-    sender = service.open_account(10_000)
-    recipient = service.open_account(0)
-    request = ("visible-after-commit", sender.account_id, recipient.account_id, 8000)
+    sender = service.open_account(dollars(10_000))
+    recipient = service.open_account(dollars(0))
+    request = ("visible-after-commit", sender.account_id, recipient.account_id, dollars(8000))
     with _statement_child(database_path, request, "pause-after-debit") as (process, channel):
         _, phase, pid, active_transaction, child_state = _message(channel, "checkpoint")
         assert phase == "pause-after-debit" and pid == process.pid and pid != os.getpid()
@@ -420,7 +445,7 @@ def test_separate_reader_cannot_see_debit_before_transfer_commits(service, datab
         assert child_state[1] == []
         assert process.is_alive()
         # The child has really debited, but independent connections see committed state.
-        assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [10_000, 0]
+        assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [dollars(10_000), dollars(0)]
         _assert_ledger(service, database_path, [])
         channel.send(("release",))
         receipt = _message(channel, "outcome")[1]
@@ -428,5 +453,5 @@ def test_separate_reader_cannot_see_debit_before_transfer_commits(service, datab
         process.join(timeout=10)
         assert not process.is_alive()
         assert process.exitcode == 0
-    assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [2000, 8000]
+    assert [service.get_balance(sender.account_id), service.get_balance(recipient.account_id)] == [dollars(2000), dollars(8000)]
     _assert_ledger(service, database_path, [receipt])
