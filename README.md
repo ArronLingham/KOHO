@@ -21,6 +21,25 @@ The demo opens accounts, transfers money, reads balances and histories, and chec
 retries and rejected requests. It creates a temporary database and removes it when
 finished.
 
+To call the library directly from Python:
+
+```python
+from move_money import MoneyService
+
+service = MoneyService("money.db")
+sender = service.open_account(12.13)
+recipient = service.open_account(0)
+receipt = service.transfer("payment-1", sender.account_id, recipient.account_id, 5.00)
+print(service.get_balance(sender.account_id))  # 7.13 (returned as a Decimal)
+print(service.get_history(sender.account_id))
+```
+
+Amounts are CAD dollars with cent precision: `12` means $12.00 and `12.13` means
+$12.13. Plain integers, floats, and `Decimal` values are accepted; returned money
+is `Decimal`, and account identifiers are integers. For exact calculations, use
+`Decimal` values constructed from text. Strings, negative amounts, and fractional
+cents are rejected.
+
 ## How to run tests
 
 After completing the setup above, run the full test suite:
@@ -56,7 +75,7 @@ The following features are outside this build's scope:
 | Authentication and signup | Identifying users, logging them in, and registering them. The brief explicitly excludes these flows. |
 | Deployment | Hosting and operating a running service. This assignment runs locally and requires no deployment. |
 | Client/bank ownership and permissions | Associating accounts with clients or banks and controlling who may access them. We kept the model limited to accounts and transfers. |
-| Multiple currencies and exchange | Currency-specific balances and conversion between currencies. This build uses CAD cents. |
+| Multiple currencies and exchange | Currency-specific balances and conversion between currencies. This build uses CAD dollars with cent precision. |
 | Fees and reversals | Charging for a transfer or recording a compensating transfer to undo one. Their additional business rules were outside the brief. |
 | History pagination and timestamps | Returning history in smaller pages and recording when transfers occurred. History currently returns all successful transfers in persisted sequence order. |
 | Combined balance/history snapshot | Reading both results at one shared database snapshot. They are separate operations in the brief and can observe different committed moments. |
@@ -75,9 +94,8 @@ Proposed next steps, in priority order:
 2. **Add a small CLI.** Provide `open`, `transfer`, `balance`, and `history`
    commands that call the existing library, use a selected persistent database,
    and print clear results and errors. Test separate command invocations, invalid
-   arguments, and retries. Dollar input could be parsed exactly into cents while
-   retaining integer arithmetic in the service.
+   arguments, and retries. Parse terminal dollar text into `Decimal` values before
+   calling the service, retaining its exact integer-cent storage arithmetic.
 3. **Assess larger-service requirements if the scope grows.** Measure write
    contention before deciding whether to move to PostgreSQL. Define client/bank
    ownership, access rules, and backup/restore requirements for that larger scope.
-   These are future design decisions, not features included in this submission.
